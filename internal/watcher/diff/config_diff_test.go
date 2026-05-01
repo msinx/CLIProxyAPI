@@ -1,10 +1,12 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildConfigChangeDetails(t *testing.T) {
@@ -548,5 +550,39 @@ func TestTrimStrings(t *testing.T) {
 	out := trimStrings([]string{" a ", "b", "  c"})
 	if len(out) != 3 || out[0] != "a" || out[1] != "b" || out[2] != "c" {
 		t.Fatalf("unexpected trimmed strings: %v", out)
+	}
+}
+
+func TestBuildConfigChangeDetails_APIKeyMetadataUpdated(t *testing.T) {
+	oldCfg := loadConfigDiffFixture(t, `api-keys:
+  - api-key: real-api-key
+    alias: Team A
+`)
+	newCfg := loadConfigDiffFixture(t, `api-keys:
+  - api-key: real-api-key
+    alias: Team B
+`)
+
+	changes := BuildConfigChangeDetails(oldCfg, newCfg)
+	expectContains(t, changes, "api-keys: metadata updated")
+	expectNotContains(t, changes, "real-api-key")
+	expectNotContains(t, changes, "Team B")
+}
+
+func loadConfigDiffFixture(t *testing.T, content string) *config.Config {
+	t.Helper()
+	var cfg config.Config
+	if err := yaml.Unmarshal([]byte(content), &cfg); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+	return &cfg
+}
+
+func expectNotContains(t *testing.T, changes []string, needle string) {
+	t.Helper()
+	for _, change := range changes {
+		if strings.Contains(change, needle) {
+			t.Fatalf("unexpected %q in changes %#v", needle, changes)
+		}
 	}
 }

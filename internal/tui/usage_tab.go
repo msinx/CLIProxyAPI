@@ -230,8 +230,9 @@ func (m usageTabModel) renderContent() string {
 				apiReqs := int64(getFloat(apiMap, "total_requests"))
 				apiToks := int64(getFloat(apiMap, "total_tokens"))
 
+				displayName := usageAPIDisplayName(apiName, apiMap)
 				row := fmt.Sprintf("  %-30s %10d %12s",
-					truncate(maskKey(apiName), 30), apiReqs, formatLargeNumber(apiToks))
+					truncate(displayName, 30), apiReqs, formatLargeNumber(apiToks))
 				sb.WriteString(lipgloss.NewStyle().Bold(true).Render(row))
 				sb.WriteString("\n")
 
@@ -260,6 +261,24 @@ func (m usageTabModel) renderContent() string {
 
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+func usageAPIDisplayName(apiName string, apiMap map[string]any) string {
+	if displayName := getString(apiMap, "display_name"); displayName != "" {
+		return displayName
+	}
+	maskedKey := getString(apiMap, "masked_key")
+	if maskedKey == "" {
+		maskedKey = maskKey(apiName)
+	}
+	label := getString(apiMap, "alias")
+	if label == "" {
+		label = getString(apiMap, "name")
+	}
+	if label != "" {
+		return fmt.Sprintf("%s (%s)", label, maskedKey)
+	}
+	return maskedKey
 }
 
 // renderTokenBreakdown aggregates input/output/cached/reasoning tokens from model details.

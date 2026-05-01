@@ -132,3 +132,18 @@ func TestUsageTimeTranslations(t *testing.T) {
 		})
 	}
 }
+
+func TestUsageAPIDisplayNamePrefersDisplayNameAndAlias(t *testing.T) {
+	if got := usageAPIDisplayName("real-api-key", map[string]any{"display_name": "Team Alias (real****-key)"}); got != "Team Alias (real****-key)" {
+		t.Fatalf("display_name path = %q", got)
+	}
+	if got := usageAPIDisplayName("real-api-key", map[string]any{"alias": "Team Alias", "name": "Team Name", "masked_key": "real****-key"}); got != "Team Alias (real****-key)" {
+		t.Fatalf("alias path = %q", got)
+	}
+	if got := usageAPIDisplayName("real-api-key", map[string]any{"name": "Team Name", "masked_key": "real****-key"}); got != "Team Name (real****-key)" {
+		t.Fatalf("name path = %q", got)
+	}
+	if got := usageAPIDisplayName("real-api-key", map[string]any{}); got != "real****-key" {
+		t.Fatalf("fallback path = %q", got)
+	}
+}
