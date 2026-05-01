@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 )
 
@@ -27,9 +28,55 @@ func (h *Handler) GetUsageStatistics(c *gin.Context) {
 		snapshot = h.usageStats.Snapshot()
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"usage":           snapshot,
+		"usage":           enrichUsageSnapshotForDisplay(snapshot, h.configForUsageDisplay()),
 		"failed_requests": snapshot.FailureCount,
 	})
+}
+
+func (h *Handler) configForUsageDisplay() *config.Config {
+	if h == nil {
+		return nil
+	}
+	return h.cfg
+}
+
+func enrichUsageSnapshotForDisplay(snapshot usage.StatisticsSnapshot, cfg *config.Config) gin.H {
+	apis := make(map[string]any, len(snapshot.APIs))
+	for apiName, apiSnapshot := range snapshot.APIs {
+		apiMap := gin.H{
+			"total_requests": apiSnapshot.TotalRequests,
+			"total_tokens":   apiSnapshot.TotalTokens,
+			"models":         apiSnapshot.Models,
+		}
+		if cfg != nil && cfg.SDKConfig.HasAPIKey(apiName) {
+			maskedKey := config.MaskAPIKey(apiName)
+			apiMap["masked_key"] = maskedKey
+			apiMap["display_name"] = cfg.SDKConfig.DisplayLabelForAPIKey(apiName)
+			if metadata, ok := cfg.SDKConfig.APIKeyMetadata(apiName); ok {
+				if alias := config.SafeAPIKeyMetadataText(apiName, metadata.Alias); alias != "" {
+					apiMap["alias"] = alias
+				}
+				if name := config.SafeAPIKeyMetadataText(apiName, metadata.Name); name != "" {
+					apiMap["name"] = name
+				}
+				if comment := config.SafeAPIKeyMetadataText(apiName, metadata.Comment); comment != "" {
+					apiMap["comment"] = comment
+				}
+			}
+		}
+		apis[apiName] = apiMap
+	}
+	return gin.H{
+		"total_requests":   snapshot.TotalRequests,
+		"success_count":    snapshot.SuccessCount,
+		"failure_count":    snapshot.FailureCount,
+		"total_tokens":     snapshot.TotalTokens,
+		"apis":             apis,
+		"requests_by_day":  snapshot.RequestsByDay,
+		"requests_by_hour": snapshot.RequestsByHour,
+		"tokens_by_day":    snapshot.TokensByDay,
+		"tokens_by_hour":   snapshot.TokensByHour,
+	}
 }
 
 // ExportUsageStatistics returns a complete usage snapshot for backup/migration.

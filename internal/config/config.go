@@ -140,6 +140,57 @@ type Config struct {
 	legacyMigrationPending bool `yaml:"-" json:"-"`
 }
 
+// UnmarshalYAML accepts both legacy scalar top-level api-keys entries and new
+// mapping entries with display metadata while keeping SDKConfig.APIKeys as the
+// public raw-key view.
+func (cfg *Config) UnmarshalYAML(value *yaml.Node) error {
+	type rawConfig Config
+
+	node := deepCopyNode(value)
+	entries, rawKeys, err := extractTopLevelAPIKeyEntries(node)
+	if err != nil {
+		return err
+	}
+	if len(entries) > 0 {
+		replaceTopLevelAPIKeysNode(node, apiKeyEntriesFromRawKeys(rawKeys))
+	}
+
+	aux := rawConfig(*cfg)
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+
+	*cfg = Config(aux)
+	if len(entries) > 0 {
+		cfg.SDKConfig.setAPIKeyEntries(entries)
+	} else if len(cfg.APIKeys) > 0 {
+		cfg.SDKConfig.setAPIKeyEntries(apiKeyEntriesFromRawKeys(cfg.APIKeys))
+	}
+	return nil
+}
+
+// MarshalYAML emits the single public top-level api-keys field as a mixed
+// scalar/object sequence. Companion metadata remains excluded from default
+// YAML/JSON encoding and is projected only through api-keys.
+func (cfg Config) MarshalYAML() (any, error) {
+	type rawConfig Config
+
+	rendered, err := yaml.Marshal(rawConfig(cfg))
+	if err != nil {
+		return nil, err
+	}
+
+	var doc yaml.Node
+	if err = yaml.Unmarshal(rendered, &doc); err != nil {
+		return nil, err
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0] == nil {
+		return rawConfig(cfg), nil
+	}
+	replaceTopLevelAPIKeysNode(doc.Content[0], cfg.SDKConfig.APIKeyEntries())
+	return doc.Content[0], nil
+}
+
 // ClaudeHeaderDefaults configures default header values injected into Claude API requests.
 // In legacy mode, UserAgent/PackageVersion/RuntimeVersion/Timeout act as fallbacks when
 // the client omits them, while OS/Arch remain runtime-derived. When stabilized device
@@ -1580,6 +1631,153 @@ func mappingScalarValue(node *yaml.Node, key string) string {
 		}
 		if strings.ToLower(strings.TrimSpace(keyNode.Value)) == lowerKey {
 			return strings.TrimSpace(valNode.Value)
+		}
+	}
+	return ""
+}
+
+func extractTopLevelAPIKeyEntries(root *yaml.Node) ([]APIKeyEntry, []string, error) {
+	node := rootMappingNode(root)
+	if node == nil {
+		return nil, nil, nil
+	}
+	apiKeysNode := mappingValueNode(node, "api-keys")
+	if apiKeysNode == nil {
+		return nil, nil, nil
+	}
+	if apiKeysNode.Kind == yaml.ScalarNode && apiKeysNode.Tag == "!!null" {
+		return nil, nil, nil
+	}
+	if apiKeysNode.Kind != yaml.SequenceNode {
+		return nil, nil, fmt.Errorf("api-keys must be a sequence")
+	}
+
+	entries := make([]APIKeyEntry, 0, len(apiKeysNode.Content))
+	rawKeys := make([]string, 0, len(apiKeysNode.Content))
+	for _, item := range apiKeysNode.Content {
+		entry, err := apiKeyEntryFromYAMLNode(item)
+		if err != nil {
+			return nil, nil, err
+		}
+		entries = append(entries, entry)
+		rawKeys = append(rawKeys, entry.APIKey)
+	}
+	return entries, rawKeys, nil
+}
+
+func apiKeyEntryFromYAMLNode(node *yaml.Node) (APIKeyEntry, error) {
+	if node == nil {
+		return APIKeyEntry{}, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		return APIKeyEntry{APIKey: node.Value}, nil
+	case yaml.MappingNode:
+		return APIKeyEntry{
+			APIKey:  firstMappingScalarValue(node, "api-key", "api_key", "apikey", "key"),
+			Alias:   strings.TrimSpace(firstMappingScalarValue(node, "alias")),
+			Name:    strings.TrimSpace(firstMappingScalarValue(node, "name")),
+			Comment: strings.TrimSpace(firstMappingScalarValue(node, "comment", "note")),
+		}, nil
+	default:
+		return APIKeyEntry{}, fmt.Errorf("api-keys entries must be strings or mappings")
+	}
+}
+
+func replaceTopLevelAPIKeysNode(root *yaml.Node, entries []APIKeyEntry) {
+	node := rootMappingNode(root)
+	if node == nil {
+		return
+	}
+	seq := apiKeyEntriesYAMLNode(entries)
+	if value := mappingValueNode(node, "api-keys"); value != nil {
+		*value = *seq
+		return
+	}
+	node.Content = append(node.Content, &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!!str",
+		Value: "api-keys",
+	}, seq)
+}
+
+func apiKeyEntriesYAMLNode(entries []APIKeyEntry) *yaml.Node {
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, entry := range entries {
+		seq.Content = append(seq.Content, apiKeyEntryYAMLNode(entry))
+	}
+	return seq
+}
+
+func apiKeyEntryYAMLNode(entry APIKeyEntry) *yaml.Node {
+	if !entry.HasMetadata() {
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: entry.APIKey}
+	}
+	content := []*yaml.Node{
+		yamlStringNode("api-key"),
+		yamlStringNode(entry.APIKey),
+	}
+	if strings.TrimSpace(entry.Alias) != "" {
+		content = append(content, yamlStringNode("alias"), yamlStringNode(strings.TrimSpace(entry.Alias)))
+	}
+	if strings.TrimSpace(entry.Name) != "" {
+		content = append(content, yamlStringNode("name"), yamlStringNode(strings.TrimSpace(entry.Name)))
+	}
+	if strings.TrimSpace(entry.Comment) != "" {
+		content = append(content, yamlStringNode("comment"), yamlStringNode(strings.TrimSpace(entry.Comment)))
+	}
+	return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: content}
+}
+
+func yamlStringNode(value string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
+}
+
+func apiKeyEntriesFromRawKeys(keys []string) []APIKeyEntry {
+	if len(keys) == 0 {
+		return nil
+	}
+	entries := make([]APIKeyEntry, 0, len(keys))
+	for _, key := range keys {
+		entries = append(entries, APIKeyEntry{APIKey: key})
+	}
+	return entries
+}
+
+func rootMappingNode(node *yaml.Node) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		return rootMappingNode(node.Content[0])
+	}
+	if node.Kind == yaml.MappingNode {
+		return node
+	}
+	return nil
+}
+
+func mappingValueNode(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	lowerKey := strings.ToLower(strings.TrimSpace(key))
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		if keyNode == nil {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(keyNode.Value)) == lowerKey {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func firstMappingScalarValue(node *yaml.Node, keys ...string) string {
+	for _, key := range keys {
+		if value := mappingScalarValue(node, key); value != "" {
+			return value
 		}
 	}
 	return ""

@@ -96,6 +96,8 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 		changes = append(changes, fmt.Sprintf("api-keys count: %d -> %d", len(oldCfg.APIKeys), len(newCfg.APIKeys)))
 	} else if !reflect.DeepEqual(trimStrings(oldCfg.APIKeys), trimStrings(newCfg.APIKeys)) {
 		changes = append(changes, "api-keys: values updated (count unchanged, redacted)")
+	} else if !reflect.DeepEqual(apiKeyMetadataFingerprint(&oldCfg.SDKConfig), apiKeyMetadataFingerprint(&newCfg.SDKConfig)) {
+		changes = append(changes, "api-keys: metadata updated")
 	}
 	if len(oldCfg.GeminiKey) != len(newCfg.GeminiKey) {
 		changes = append(changes, fmt.Sprintf("gemini-api-key count: %d -> %d", len(oldCfg.GeminiKey), len(newCfg.GeminiKey)))
@@ -331,6 +333,23 @@ func trimStrings(in []string) []string {
 	out := make([]string, len(in))
 	for i := range in {
 		out[i] = strings.TrimSpace(in[i])
+	}
+	return out
+}
+
+func apiKeyMetadataFingerprint(cfg *config.SDKConfig) map[string]string {
+	if cfg == nil {
+		return nil
+	}
+	metadata := cfg.APIKeyMetadataByKey()
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(metadata))
+	for key, entry := range metadata {
+		out[key] = strings.TrimSpace(entry.Alias) + "\x00" +
+			strings.TrimSpace(entry.Name) + "\x00" +
+			strings.TrimSpace(entry.Comment)
 	}
 	return out
 }
