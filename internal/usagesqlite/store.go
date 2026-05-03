@@ -6,11 +6,27 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Store struct {
-	db *DB
+	db     *DB
+	prices map[string]ModelPrice
+	mu     sync.RWMutex
+}
+
+type ModelPrice struct {
+	PromptPricePer1M     float64
+	CompletionPricePer1M float64
+	CachePricePer1M      float64
+}
+
+type costAggregate struct {
+	Total     float64
+	Count     int64
+	Unpriced  int64
+	Available bool
 }
 
 const insertUsageEventSQL = `INSERT OR IGNORE INTO usage_events (
@@ -21,6 +37,16 @@ const insertUsageEventSQL = `INSERT OR IGNORE INTO usage_events (
 
 func NewStore(db *DB) *Store {
 	return &Store{db: db}
+}
+
+func (s *Store) SetModelPrices(prices map[string]ModelPrice) {
+	if s == nil {
+		return
+	}
+	normalized := normalizeModelPrices(prices)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prices = normalized
 }
 
 func (s *Store) InsertEvent(ctx context.Context, event Event) error {
@@ -131,6 +157,13 @@ func (s *Store) GetOverview(ctx context.Context, filter QueryFilter) (Overview, 
 		return overview, fmt.Errorf("query sqlite usage overview: %w", err)
 	}
 	finalizeSummary(&overview.Summary, filter)
+	if s.hasModelPrices() {
+		costs, errCost := s.costRollups(ctx, filter, "'summary'", false)
+		if errCost != nil {
+			return overview, fmt.Errorf("query sqlite usage summary cost: %w", errCost)
+		}
+		applyCostAggregateToSummary(&overview.Summary, costs["summary"])
+	}
 
 	var err error
 	overview.HourlySeries, err = s.listBuckets(ctx, filter, 3600)
@@ -209,7 +242,7 @@ func (s *Store) ListEvents(ctx context.Context, filter QueryFilter) (EventsPage,
 		event.Timestamp = time.Unix(ts, 0).UTC()
 		event.CreatedAt = time.Unix(created, 0).UTC()
 		event.Failed = failed != 0
-		events = append(events, eventView(event))
+		events = append(events, s.eventView(event))
 	}
 	if errRows := rows.Err(); errRows != nil {
 		return EventsPage{}, fmt.Errorf("iterate sqlite usage events: %w", errRows)
@@ -331,7 +364,6 @@ func (s *Store) listBuckets(ctx context.Context, filter QueryFilter, seconds int
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite usage buckets: %w", err)
 	}
-	defer closeRows(rows)
 
 	out := []TimeBucket{}
 	for rows.Next() {
@@ -345,7 +377,19 @@ func (s *Store) listBuckets(ctx context.Context, filter QueryFilter, seconds int
 		out = append(out, bucket)
 	}
 	if errRows := rows.Err(); errRows != nil {
+		closeRows(rows)
 		return nil, fmt.Errorf("iterate sqlite usage buckets: %w", errRows)
+	}
+	closeRows(rows)
+	if !s.hasModelPrices() {
+		return out, nil
+	}
+	costs, errCost := s.costRollups(ctx, filter, fmt.Sprintf("CAST((timestamp / %d) * %d AS TEXT)", seconds, seconds), false)
+	if errCost != nil {
+		return nil, fmt.Errorf("query sqlite usage bucket cost: %w", errCost)
+	}
+	for i := range out {
+		applyCostAggregateToBucket(&out[i], costs[fmt.Sprintf("%d", out[i].Bucket.Unix())])
 	}
 	return out, nil
 }
@@ -370,7 +414,6 @@ func (s *Store) breakdown(ctx context.Context, filter QueryFilter, column string
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite usage breakdown: %w", err)
 	}
-	defer closeRows(rows)
 
 	out := []BreakdownRow{}
 	for rows.Next() {
@@ -387,7 +430,19 @@ func (s *Store) breakdown(ctx context.Context, filter QueryFilter, column string
 		out = append(out, row)
 	}
 	if errRows := rows.Err(); errRows != nil {
+		closeRows(rows)
 		return nil, fmt.Errorf("iterate sqlite usage breakdown: %w", errRows)
+	}
+	closeRows(rows)
+	if !s.hasModelPrices() {
+		return out, nil
+	}
+	costs, errCost := s.costRollups(ctx, filter, fmt.Sprintf("TRIM(%s)", column), true)
+	if errCost != nil {
+		return nil, fmt.Errorf("query sqlite usage breakdown cost: %w", errCost)
+	}
+	for i := range out {
+		applyCostAggregateToBreakdown(&out[i], costs[out[i].Key])
 	}
 	return out, nil
 }
@@ -480,8 +535,8 @@ func buildWhere(filter QueryFilter) (string, []any) {
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
 
-func eventView(event Event) EventView {
-	return EventView{
+func (s *Store) eventView(event Event) EventView {
+	view := EventView{
 		ID:              event.ID,
 		RequestID:       event.RequestID,
 		Timestamp:       event.Timestamp,
@@ -506,6 +561,144 @@ func eventView(event Event) EventView {
 		TotalTokens:     event.TotalTokens,
 		CreatedAt:       event.CreatedAt,
 	}
+	view.EstimatedCost, view.CostAvailable = s.eventCost(event)
+	return view
+}
+
+func normalizeModelPrices(prices map[string]ModelPrice) map[string]ModelPrice {
+	if len(prices) == 0 {
+		return nil
+	}
+	normalized := make(map[string]ModelPrice, len(prices))
+	for model, price := range prices {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if price.PromptPricePer1M < 0 {
+			price.PromptPricePer1M = 0
+		}
+		if price.CompletionPricePer1M < 0 {
+			price.CompletionPricePer1M = 0
+		}
+		if price.CachePricePer1M < 0 {
+			price.CachePricePer1M = 0
+		}
+		normalized[model] = price
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func (s *Store) modelPricesSnapshot() map[string]ModelPrice {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.prices) == 0 {
+		return nil
+	}
+	out := make(map[string]ModelPrice, len(s.prices))
+	for model, price := range s.prices {
+		out[model] = price
+	}
+	return out
+}
+
+func (s *Store) hasModelPrices() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.prices) > 0
+}
+
+func (s *Store) eventCost(event Event) (float64, bool) {
+	prices := s.modelPricesSnapshot()
+	return eventCostWithPrices(event, prices)
+}
+
+func eventCostWithPrices(event Event, prices map[string]ModelPrice) (float64, bool) {
+	price, ok := prices[strings.TrimSpace(event.Model)]
+	if !ok {
+		return 0, false
+	}
+	cost := float64(event.InputTokens)/1_000_000*price.PromptPricePer1M +
+		float64(event.OutputTokens)/1_000_000*price.CompletionPricePer1M +
+		float64(event.CachedTokens)/1_000_000*price.CachePricePer1M
+	return cost, true
+}
+
+func (s *Store) costRollups(ctx context.Context, filter QueryFilter, keyExpr string, requireNonEmptyKey bool) (map[string]costAggregate, error) {
+	prices := s.modelPricesSnapshot()
+	where, args := buildWhere(filter)
+	if requireNonEmptyKey {
+		where += fmt.Sprintf(" AND %s != ''", keyExpr)
+	}
+	query := fmt.Sprintf(`SELECT %s AS cost_key,
+		TRIM(model) AS model_key,
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(cached_tokens), 0),
+		COUNT(*)
+		FROM usage_events %s GROUP BY cost_key, model_key`, keyExpr, where)
+	rows, err := s.db.sqlDB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows(rows)
+
+	out := map[string]costAggregate{}
+	for rows.Next() {
+		var key string
+		var event Event
+		var count int64
+		if errScan := rows.Scan(&key, &event.Model, &event.InputTokens, &event.OutputTokens, &event.CachedTokens, &count); errScan != nil {
+			return nil, errScan
+		}
+		aggregate := out[key]
+		aggregate.Count += count
+		cost, ok := eventCostWithPrices(event, prices)
+		if !ok {
+			aggregate.Unpriced += count
+		} else {
+			aggregate.Total += cost
+		}
+		aggregate.Available = aggregate.Count > 0 && aggregate.Unpriced == 0
+		out[key] = aggregate
+	}
+	if errRows := rows.Err(); errRows != nil {
+		return nil, errRows
+	}
+	return out, nil
+}
+
+func applyCostAggregateToSummary(summary *Summary, aggregate costAggregate) {
+	if summary == nil || aggregate.Count == 0 {
+		return
+	}
+	summary.TotalCost = aggregate.Total
+	summary.CostAvailable = aggregate.Available
+}
+
+func applyCostAggregateToBucket(bucket *TimeBucket, aggregate costAggregate) {
+	if bucket == nil || aggregate.Count == 0 {
+		return
+	}
+	bucket.TotalCost = aggregate.Total
+	bucket.CostAvailable = aggregate.Available
+}
+
+func applyCostAggregateToBreakdown(row *BreakdownRow, aggregate costAggregate) {
+	if row == nil || aggregate.Count == 0 {
+		return
+	}
+	row.TotalCost = aggregate.Total
+	row.CostAvailable = aggregate.Available
 }
 
 func maskSource(source string) string {

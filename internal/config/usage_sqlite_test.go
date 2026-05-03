@@ -49,6 +49,9 @@ func TestLoadConfigOptionalUsageSQLiteDefaults(t *testing.T) {
 	if cfg.UsageSQLiteBackupRetentionDays != 7 {
 		t.Fatalf("UsageSQLiteBackupRetentionDays = %d, want 7", cfg.UsageSQLiteBackupRetentionDays)
 	}
+	if len(cfg.UsageModelPrices) != 0 {
+		t.Fatalf("UsageModelPrices = %+v, want empty default", cfg.UsageModelPrices)
+	}
 	if cfg.RemoteManagement.PanelGitHubRepository != DefaultPanelGitHubRepository {
 		t.Fatalf("PanelGitHubRepository = %q", cfg.RemoteManagement.PanelGitHubRepository)
 	}
@@ -66,6 +69,13 @@ usage-sqlite-maintenance-interval: 0s
 usage-sqlite-backup-path: "  "
 usage-sqlite-backup-retention-days: -3
 usage-retention-days: -5
+usage-model-prices:
+  "  gpt-5.4  ":
+    prompt-price-per-1m: -1
+    completion-price-per-1m: 10
+    cache-price-per-1m: -0.25
+  "   ":
+    prompt-price-per-1m: 2
 `)
 	if err := os.WriteFile(configPath, data, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -95,5 +105,12 @@ usage-retention-days: -5
 	}
 	if cfg.UsageSQLiteBackupRetentionDays != 0 {
 		t.Fatalf("UsageSQLiteBackupRetentionDays = %d, want 0 for invalid negative", cfg.UsageSQLiteBackupRetentionDays)
+	}
+	if len(cfg.UsageModelPrices) != 1 {
+		t.Fatalf("len(UsageModelPrices) = %d, want 1: %+v", len(cfg.UsageModelPrices), cfg.UsageModelPrices)
+	}
+	price := cfg.UsageModelPrices["gpt-5.4"]
+	if price.PromptPricePer1M != 0 || price.CompletionPricePer1M != 10 || price.CachePricePer1M != 0 {
+		t.Fatalf("UsageModelPrices[gpt-5.4] = %+v, want negative rates clamped and key trimmed", price)
 	}
 }

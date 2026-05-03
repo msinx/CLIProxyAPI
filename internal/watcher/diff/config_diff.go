@@ -69,6 +69,9 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.UsageSQLiteBackupRetentionDays != newCfg.UsageSQLiteBackupRetentionDays {
 		changes = append(changes, fmt.Sprintf("usage-sqlite-backup-retention-days: %d -> %d", oldCfg.UsageSQLiteBackupRetentionDays, newCfg.UsageSQLiteBackupRetentionDays))
 	}
+	if !reflect.DeepEqual(oldCfg.UsageModelPrices, newCfg.UsageModelPrices) {
+		changes = append(changes, fmt.Sprintf("usage-model-prices: updated (%d -> %d entries)", len(oldCfg.UsageModelPrices), len(newCfg.UsageModelPrices)))
+	}
 	if oldCfg.RedisUsageQueueRetentionSeconds != newCfg.RedisUsageQueueRetentionSeconds {
 		changes = append(changes, fmt.Sprintf("redis-usage-queue-retention-seconds: %d -> %d", oldCfg.RedisUsageQueueRetentionSeconds, newCfg.RedisUsageQueueRetentionSeconds))
 	}
