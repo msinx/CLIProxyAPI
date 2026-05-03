@@ -87,6 +87,18 @@ type Config struct {
 	// UsageSQLiteFlushInterval controls the maximum interval between SQLite usage flushes.
 	UsageSQLiteFlushInterval time.Duration `yaml:"usage-sqlite-flush-interval" json:"usage-sqlite-flush-interval"`
 
+	// UsageSQLiteMaintenanceInterval controls how often SQLite usage maintenance runs.
+	UsageSQLiteMaintenanceInterval time.Duration `yaml:"usage-sqlite-maintenance-interval" json:"usage-sqlite-maintenance-interval"`
+
+	// UsageSQLiteBackupEnabled toggles periodic SQLite usage database backups.
+	UsageSQLiteBackupEnabled bool `yaml:"usage-sqlite-backup-enabled" json:"usage-sqlite-backup-enabled"`
+
+	// UsageSQLiteBackupPath is the directory used for SQLite usage backups.
+	UsageSQLiteBackupPath string `yaml:"usage-sqlite-backup-path" json:"usage-sqlite-backup-path"`
+
+	// UsageSQLiteBackupRetentionDays controls backup cleanup. Set to 0 to keep only current-day backups.
+	UsageSQLiteBackupRetentionDays int `yaml:"usage-sqlite-backup-retention-days" json:"usage-sqlite-backup-retention-days"`
+
 	// RedisUsageQueueRetentionSeconds controls how long (in seconds) usage queue items
 	// are retained in memory for the Redis RESP interface (LPOP/RPOP).
 	// Default: 60. Max: 3600.
@@ -642,6 +654,10 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.UsageSQLiteBufferSize = 4096
 	cfg.UsageSQLiteBatchSize = 100
 	cfg.UsageSQLiteFlushInterval = time.Second
+	cfg.UsageSQLiteMaintenanceInterval = 24 * time.Hour
+	cfg.UsageSQLiteBackupEnabled = false
+	cfg.UsageSQLiteBackupPath = "./data/usage-backups"
+	cfg.UsageSQLiteBackupRetentionDays = 7
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
 	cfg.DisableImageGeneration = DisableImageGenerationOff
@@ -727,6 +743,16 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	}
 	if cfg.UsageSQLiteFlushInterval <= 0 {
 		cfg.UsageSQLiteFlushInterval = time.Second
+	}
+	if cfg.UsageSQLiteMaintenanceInterval <= 0 {
+		cfg.UsageSQLiteMaintenanceInterval = 24 * time.Hour
+	}
+	cfg.UsageSQLiteBackupPath = strings.TrimSpace(cfg.UsageSQLiteBackupPath)
+	if cfg.UsageSQLiteBackupPath == "" {
+		cfg.UsageSQLiteBackupPath = "./data/usage-backups"
+	}
+	if cfg.UsageSQLiteBackupRetentionDays < 0 {
+		cfg.UsageSQLiteBackupRetentionDays = 0
 	}
 
 	if cfg.MaxRetryCredentials < 0 {

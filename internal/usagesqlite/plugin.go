@@ -143,10 +143,8 @@ func (p *Plugin) run(ctx context.Context) {
 		if len(batch) == 0 {
 			return
 		}
-		for _, event := range batch {
-			if err := p.store.InsertEvent(context.Background(), event); err != nil {
-				log.WithError(err).Warn("failed to write sqlite usage event")
-			}
+		if err := p.store.InsertEvents(context.Background(), batch); err != nil {
+			log.WithError(err).Warn("failed to write sqlite usage event batch")
 		}
 		batch = batch[:0]
 	}

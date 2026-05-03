@@ -88,6 +88,18 @@ usage-sqlite-batch-size: 100
 # SQLite usage writer maximum flush interval.
 usage-sqlite-flush-interval: 1s
 
+# SQLite usage maintenance interval for retention cleanup, WAL checkpoint, vacuum, and optional backups.
+usage-sqlite-maintenance-interval: 24h
+
+# Enable periodic SQLite usage database backups during maintenance.
+usage-sqlite-backup-enabled: false
+
+# SQLite usage backup directory. Parent directories are created when backups run.
+usage-sqlite-backup-path: ./data/usage-backups
+
+# SQLite usage backup retention in days. Set to 0 to keep only current-day backups.
+usage-sqlite-backup-retention-days: 7
+
 # How long (in seconds) Redis usage queue items are retained in memory for the RESP interface (LPOP/RPOP).
 # Default: 60. Max: 3600.
 redis-usage-queue-retention-seconds: 60

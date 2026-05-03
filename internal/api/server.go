@@ -972,13 +972,7 @@ func (s *Server) initUsageSQLite(cfg *config.Config) {
 		return
 	}
 	ctx := context.Background()
-	dbPath := cfg.UsageSQLitePath
-	if strings.TrimSpace(dbPath) != "" && !filepath.IsAbs(dbPath) && !strings.HasPrefix(strings.TrimSpace(dbPath), "~") {
-		base := filepath.Dir(strings.TrimSpace(s.configFilePath))
-		if base != "" && base != "." {
-			dbPath = filepath.Join(base, dbPath)
-		}
-	}
+	dbPath := resolveUsagePathFromConfig(cfg.UsageSQLitePath, s.configFilePath)
 	db, err := usagesqlite.OpenSQLite(ctx, dbPath)
 	if err != nil {
 		log.WithError(err).Warn("sqlite usage store disabled: failed to open database")
@@ -1002,12 +996,29 @@ func (s *Server) initUsageSQLite(cfg *config.Config) {
 	usageCtx, cancel := context.WithCancel(context.Background())
 	plugin.Start(usageCtx)
 	usage.RegisterPlugin(plugin)
-	usagesqlite.StartRetentionCleaner(usageCtx, store, cfg.UsageRetentionDays, 24*time.Hour)
+	usagesqlite.StartMaintenanceWorker(usageCtx, store, usagesqlite.MaintenanceOptions{
+		RetentionDays:       cfg.UsageRetentionDays,
+		BackupEnabled:       cfg.UsageSQLiteBackupEnabled,
+		BackupDir:           resolveUsagePathFromConfig(cfg.UsageSQLiteBackupPath, s.configFilePath),
+		BackupRetentionDays: cfg.UsageSQLiteBackupRetentionDays,
+	}, cfg.UsageSQLiteMaintenanceInterval)
 
 	s.usageSQLiteDB = db
 	s.usageSQLiteStore = store
 	s.usageSQLitePlugin = plugin
 	s.usageSQLiteCancel = cancel
+}
+
+func resolveUsagePathFromConfig(pathValue, configFilePath string) string {
+	resolved := pathValue
+	trimmed := strings.TrimSpace(resolved)
+	if trimmed != "" && !filepath.IsAbs(trimmed) && !strings.HasPrefix(trimmed, "~") {
+		base := filepath.Dir(strings.TrimSpace(configFilePath))
+		if base != "" && base != "." {
+			resolved = filepath.Join(base, trimmed)
+		}
+	}
+	return resolved
 }
 
 // corsMiddleware returns a Gin middleware handler that adds CORS headers

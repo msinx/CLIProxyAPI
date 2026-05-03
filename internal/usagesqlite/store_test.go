@@ -116,6 +116,58 @@ func TestStoreInsertEventIgnoresDuplicateEventKey(t *testing.T) {
 	}
 }
 
+func TestStoreInsertEventsWritesBatchAndIgnoresDuplicates(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newTestStore(t, ctx)
+	ts := time.Date(2026, 5, 2, 10, 30, 0, 0, time.UTC)
+	events := []Event{
+		{EventKey: "batch-1", RequestID: "batch-1", Timestamp: ts, Model: "gpt-5.4", InputTokens: 10, OutputTokens: 20, CreatedAt: ts},
+		{EventKey: "batch-2", RequestID: "batch-2", Timestamp: ts.Add(time.Minute), Model: "gpt-5.4", CachedTokens: 7, CreatedAt: ts},
+		{EventKey: "batch-1", RequestID: "batch-1", Timestamp: ts.Add(2 * time.Minute), Model: "gpt-5.4", TotalTokens: 99, CreatedAt: ts},
+	}
+
+	if err := store.InsertEvents(ctx, events); err != nil {
+		t.Fatalf("InsertEvents() error = %v", err)
+	}
+
+	overview, err := store.GetOverview(ctx, QueryFilter{})
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	if overview.Summary.RequestCount != 2 {
+		t.Fatalf("RequestCount = %d, want 2", overview.Summary.RequestCount)
+	}
+	if overview.Summary.TotalTokens != 37 {
+		t.Fatalf("TotalTokens = %d, want normalized first values 37", overview.Summary.TotalTokens)
+	}
+}
+
+func TestStoreInsertEventsRollsBackInvalidBatch(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newTestStore(t, ctx)
+	ts := time.Date(2026, 5, 2, 10, 30, 0, 0, time.UTC)
+
+	err := store.InsertEvents(ctx, []Event{
+		{EventKey: "valid-before-error", Timestamp: ts, TotalTokens: 10, CreatedAt: ts},
+		{EventKey: " ", Timestamp: ts, TotalTokens: 20, CreatedAt: ts},
+	})
+	if err == nil {
+		t.Fatalf("InsertEvents() error = nil, want invalid event key error")
+	}
+
+	page, err := store.ListEvents(ctx, QueryFilter{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	if page.TotalCount != 0 {
+		t.Fatalf("TotalCount = %d, want rollback to keep batch atomic", page.TotalCount)
+	}
+}
+
 func TestStoreEmptyResultsReturnJSONArrays(t *testing.T) {
 	t.Parallel()
 

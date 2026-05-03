@@ -13,62 +13,86 @@ type Store struct {
 	db *DB
 }
 
+const insertUsageEventSQL = `INSERT OR IGNORE INTO usage_events (
+	event_key, request_id, timestamp, provider, model, endpoint, api_group_key, source,
+	source_hash, auth_index, auth_id_hash, auth_type, api_key_hash, failed, status_code,
+	latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
 func NewStore(db *DB) *Store {
 	return &Store{db: db}
 }
 
 func (s *Store) InsertEvent(ctx context.Context, event Event) error {
+	return s.InsertEvents(ctx, []Event{event})
+}
+
+func (s *Store) InsertEvents(ctx context.Context, events []Event) error {
 	if s == nil || s.db == nil || s.db.sqlDB == nil {
 		return fmt.Errorf("sqlite usage store is not initialized")
 	}
+	if len(events) == 0 {
+		return nil
+	}
+
+	normalized := make([]Event, 0, len(events))
 	now := time.Now()
-	if event.Timestamp.IsZero() {
-		event.Timestamp = now
+	for _, event := range events {
+		normalizedEvent, err := normalizeEvent(event, now)
+		if err != nil {
+			return err
+		}
+		normalized = append(normalized, normalizedEvent)
 	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = now
-	}
-	event.EventKey = strings.TrimSpace(event.EventKey)
-	if event.EventKey == "" {
-		return fmt.Errorf("usage event key is empty")
-	}
-	if event.TotalTokens == 0 {
-		event.TotalTokens = event.InputTokens + event.OutputTokens + event.ReasoningTokens
-	}
-	if event.TotalTokens == 0 {
-		event.TotalTokens = event.InputTokens + event.OutputTokens + event.ReasoningTokens + event.CachedTokens
-	}
-	_, err := s.db.sqlDB.ExecContext(ctx, `INSERT OR IGNORE INTO usage_events (
-		event_key, request_id, timestamp, provider, model, endpoint, api_group_key, source,
-		source_hash, auth_index, auth_id_hash, auth_type, api_key_hash, failed, status_code,
-		latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		event.EventKey,
-		event.RequestID,
-		event.Timestamp.Unix(),
-		event.Provider,
-		event.Model,
-		event.Endpoint,
-		event.APIGroupKey,
-		event.Source,
-		event.SourceHash,
-		event.AuthIndex,
-		event.AuthIDHash,
-		event.AuthType,
-		event.APIKeyHash,
-		boolToInt(event.Failed),
-		event.StatusCode,
-		event.LatencyMS,
-		event.InputTokens,
-		event.OutputTokens,
-		event.ReasoningTokens,
-		event.CachedTokens,
-		event.TotalTokens,
-		event.CreatedAt.Unix(),
-	)
+
+	tx, err := s.db.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("insert sqlite usage event: %w", err)
+		return fmt.Errorf("begin sqlite usage event batch: %w", err)
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	stmt, err := tx.PrepareContext(ctx, insertUsageEventSQL)
+	if err != nil {
+		return fmt.Errorf("prepare sqlite usage event batch: %w", err)
+	}
+	defer closeStmt(stmt)
+
+	for _, event := range normalized {
+		if _, errExec := stmt.ExecContext(ctx,
+			event.EventKey,
+			event.RequestID,
+			event.Timestamp.Unix(),
+			event.Provider,
+			event.Model,
+			event.Endpoint,
+			event.APIGroupKey,
+			event.Source,
+			event.SourceHash,
+			event.AuthIndex,
+			event.AuthIDHash,
+			event.AuthType,
+			event.APIKeyHash,
+			boolToInt(event.Failed),
+			event.StatusCode,
+			event.LatencyMS,
+			event.InputTokens,
+			event.OutputTokens,
+			event.ReasoningTokens,
+			event.CachedTokens,
+			event.TotalTokens,
+			event.CreatedAt.Unix(),
+		); errExec != nil {
+			return fmt.Errorf("insert sqlite usage event batch: %w", errExec)
+		}
+	}
+	if errCommit := tx.Commit(); errCommit != nil {
+		return fmt.Errorf("commit sqlite usage event batch: %w", errCommit)
+	}
+	committed = true
 	return nil
 }
 
@@ -542,6 +566,30 @@ func boolToInt(value bool) int {
 	return 0
 }
 
+func normalizeEvent(event Event, now time.Time) (Event, error) {
+	if event.Timestamp.IsZero() {
+		event.Timestamp = now
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = now
+	}
+	event.EventKey = strings.TrimSpace(event.EventKey)
+	if event.EventKey == "" {
+		return Event{}, fmt.Errorf("usage event key is empty")
+	}
+	if event.TotalTokens == 0 {
+		event.TotalTokens = event.InputTokens + event.OutputTokens + event.ReasoningTokens
+	}
+	if event.TotalTokens == 0 {
+		event.TotalTokens = event.InputTokens + event.OutputTokens + event.ReasoningTokens + event.CachedTokens
+	}
+	return event, nil
+}
+
 func closeRows(rows *sql.Rows) {
 	_ = rows.Close()
+}
+
+func closeStmt(stmt *sql.Stmt) {
+	_ = stmt.Close()
 }
