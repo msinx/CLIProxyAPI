@@ -24,6 +24,7 @@
 
 - 只向 `origin` 推送个人 fork，不能误推 `upstream`。
 - 前端 release 必须先完成，再发布后端。后端默认管理面板资产会从个人前端 fork 的 release 下载 `management.html`。
+- 运行环境的 `config.yaml` 会覆盖代码默认值。即使后端代码默认指向个人前端 fork，如果实际配置里仍写着官方 `panel-github-repository`，后端仍会下载官方 latest management UI。
 - 不使用 MySQL 保存 usage 数据。本功能使用 SQLite，默认位置是后端进程工作目录下的 `./data/usage.db`，可通过 `usage-sqlite-path` 修改。
 
 ## 功能背景
@@ -71,6 +72,19 @@
 - `usage-sqlite-buffer-size`
 - `usage-sqlite-batch-size`
 - `usage-sqlite-flush-interval`
+
+管理面板资产源配置：
+
+```yaml
+remote-management:
+  panel-github-repository: "https://github.com/msinx/Cli-Proxy-API-Management-Center"
+```
+
+注意：
+
+- 这项如果在运行环境 `config.yaml` 中显式写成官方仓库，会覆盖个人 fork 的代码默认值。
+- 错误配置为官方源时，后端会从 `router-for-me/Cli-Proxy-API-Management-Center/releases/latest` 下载官方 `management.html`。官方 latest 可能显示例如 `v1.10.1`，并且不包含个人 fork 的 Usage dashboard。
+- 改回个人 fork 源后，重启后端通常即可重新拉取正确前端。如果本地已有旧缓存，可停止服务后删除静态目录中的 `management.html`，再启动后端。
 
 关键 API：
 
@@ -133,7 +147,7 @@ rebase 时要特别注意：
 ```bash
 npm run type-check
 npm run lint
-npm run build
+VERSION=v1.8.2.2 npm run build
 git diff --check
 
 git push -u origin usage-dashboard-sqlite-api
@@ -146,6 +160,10 @@ gh release create v1.8.2.2 /private/tmp/management.html \
   --title "v1.8.2.2" \
   --notes "SQLite usage dashboard for the management center."
 ```
+
+前端构建必须显式传 `VERSION=<4段tag>`。前端 `vite.config.ts` 会优先读取 `VERSION` 环境变量；如果不传，会尝试用 `git describe` 推导版本。在 rebase 到 upstream 最新后，工作树附近可能同时存在官方 tag 或旧个人 fork tag，容易让页面显示错误的“管理中心版本”。
+
+发布资产必须真的命名为 `management.html`。不要依赖 `gh release create file#management.html` 这类写法；当前 `gh` 版本可能把 `#management.html` 当成 label，而不是重命名文件。稳妥做法是先复制到 `/private/tmp/management.html`，再上传这个真实文件名。
 
 如果 release 已存在，覆盖资产：
 
@@ -355,7 +373,7 @@ git rebase upstream/main
 
 npm run type-check
 npm run lint
-npm run build
+VERSION=v1.8.3.1 npm run build
 git diff --check
 ```
 
@@ -416,9 +434,13 @@ gh release view v6.10.2.1 --repo msinx/CLIProxyAPI --json tagName,url,assets
 确认内容：
 
 - 前端 release 有且只有当前需要的 `management.html`。
+- `management.html` 的 digest 和本地 `/private/tmp/management.html` 的 sha256 一致。
+- 构建产物中显示的管理中心版本是个人 fork 4 段版本，而不是官方 3 段版本。
 - 后端 release 有 `checksums.txt` 和各平台二进制包。
 - 两个仓库 `git status --short --branch` 没有未提交变更。
 - 后端 tag 对应的 commit 包含管理面板 updater 指向个人前端 fork 的改动。
+- 运行环境 `config.yaml` 的 `remote-management.panel-github-repository` 指向 `https://github.com/msinx/Cli-Proxy-API-Management-Center`。
+- 如果服务仍显示官方 UI 版本，检查并删除本地缓存的 `static/management.html` 后重启。
 
 ## 当前已发布版本快照
 
@@ -426,10 +448,11 @@ gh release view v6.10.2.1 --repo msinx/CLIProxyAPI --json tagName,url,assets
 
 - 分支：`usage-dashboard-sqlite-api`
 - 提交：`ecd1293 Restore SQLite usage dashboard in the management center`
-- tag：`v1.8.2.2`
-- release：https://github.com/msinx/Cli-Proxy-API-Management-Center/releases/tag/v1.8.2.2
+- tag：`v1.10.1.1`
+- release：https://github.com/msinx/Cli-Proxy-API-Management-Center/releases/tag/v1.10.1.1
 - release asset：`management.html`
-- asset sha256：`cdfc230645f426152daf75f2182ec4e38b1e9630efb80b23ca7069208fc38a68`
+- asset sha256：`8b44b4ffb2811428c077f29f58c4e0cd2d0b726afb16d59d6a56230545179d33`
+- 说明：`v1.10.1.1` 是在 upstream frontend `v1.10.1` 基础上叠加 Usage dashboard 后发布的个人 fork 前端。构建时使用 `VERSION=v1.10.1.1 npm run build`，确保管理中心版本显示 4 段个人 fork 版本。
 
 后端：
 
@@ -446,7 +469,7 @@ gh release view v6.10.2.1 --repo msinx/CLIProxyAPI --json tagName,url,assets
 ```bash
 npm run type-check
 npm run lint
-npm run build
+VERSION=<frontend-4-part-tag> npm run build
 git diff --check
 ```
 
@@ -464,6 +487,9 @@ git diff --check
 - 后端完整 `go test ./...` 曾出现与本功能无关的失败，涉及 `internal/registry` 的 Codex free model 测试和 `internal/runtime/executor` 的 Antigravity credits 测试。rebase 后如果完整测试失败，需要先区分是否仍是这些 upstream/外部数据相关问题。
 - `go build` 在沙箱中可能输出 Go module stat cache 的 `operation not permitted` warning；只要退出码为 0 且二进制生成成功，该 warning 不代表编译失败。
 - GitHub Actions 可能提示 Node.js 20 actions 未来弃用，这是 workflow 维护项，不影响已成功的 goreleaser release。
+- 前端 release 如果误出现两个类似 `management.html` 的资产，通常是上传命令使用了 `file#management.html` 造成的。删除多余资产和 digest 不匹配的资产，保留唯一的 `management.html`，并确认 digest 与本地构建产物一致。
+- 如果发布后管理中心显示官方 3 段版本，例如 `v1.10.1`，优先检查运行环境 `config.yaml` 是否仍指向官方 `router-for-me/Cli-Proxy-API-Management-Center`。配置指向官方源时，后端会正确地下载官方 latest，这不是 GitHub latest 选择错了。
+- 改正 `panel-github-repository` 后，重启后端通常即可恢复。如果仍显示旧版本，删除本地缓存的 `static/management.html` 后再启动后端，并强制刷新浏览器。
 
 ## 未来让 Codex 处理时的提示词建议
 
