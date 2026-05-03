@@ -3,6 +3,7 @@ package usagesqlite
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,8 +56,8 @@ func TestStoreInsertEventAndListEvents(t *testing.T) {
 	if got.RequestID != "req_1" || got.Model != "gpt-5.4" || got.TotalTokens != 33 {
 		t.Fatalf("unexpected event view: %+v", got)
 	}
-	if got.SourceDisplay != "a***@example.com" {
-		t.Fatalf("SourceDisplay = %q, want masked email", got.SourceDisplay)
+	if got.SourceDisplay != "OpenAI · API key · a***@example.com" {
+		t.Fatalf("SourceDisplay = %q, want enriched masked email", got.SourceDisplay)
 	}
 }
 
@@ -80,11 +81,51 @@ func TestStoreDoesNotDisplayShortSourceRaw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents() error = %v", err)
 	}
-	if page.Events[0].SourceDisplay == "sk-1234" {
+	if strings.Contains(page.Events[0].SourceDisplay, "sk-1234") {
 		t.Fatalf("SourceDisplay exposed raw short source")
 	}
-	if page.Sources[0].Display == "sk-1234" {
+	if strings.Contains(page.Sources[0].Display, "sk-1234") {
 		t.Fatalf("source option exposed raw short source")
+	}
+}
+
+func TestStoreResolvesCredentialDisplayWithoutExposingRawSource(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newTestStore(t, ctx)
+	ts := time.Date(2026, 5, 2, 10, 30, 0, 0, time.UTC)
+	if err := store.InsertEvent(ctx, Event{
+		EventKey:   "display",
+		Timestamp:  ts,
+		Provider:   "openai",
+		Source:     "alice@example.com",
+		SourceHash: "src_hash",
+		AuthIndex:  "3",
+		AuthType:   "oauth",
+		CreatedAt:  ts,
+	}); err != nil {
+		t.Fatalf("InsertEvent() error = %v", err)
+	}
+
+	page, err := store.ListEvents(ctx, QueryFilter{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	if got, want := page.Events[0].SourceDisplay, "OpenAI · OAuth · a***@example.com"; got != want {
+		t.Fatalf("SourceDisplay = %q, want %q", got, want)
+	}
+	if page.Events[0].SourceType != "oauth" {
+		t.Fatalf("SourceType = %q, want oauth", page.Events[0].SourceType)
+	}
+	if page.Events[0].SourceKey != "src_hash" {
+		t.Fatalf("SourceKey = %q, want source hash", page.Events[0].SourceKey)
+	}
+	if strings.Contains(page.Events[0].SourceDisplay, "alice@example.com") {
+		t.Fatalf("SourceDisplay exposed raw source: %q", page.Events[0].SourceDisplay)
+	}
+	if got, want := page.Sources[0].Display, "OpenAI · OAuth · a***@example.com"; got != want {
+		t.Fatalf("source option display = %q, want %q", got, want)
 	}
 }
 
@@ -248,6 +289,49 @@ func TestStoreOverviewAppliesFiltersAndComputesSummary(t *testing.T) {
 	}
 	if len(overview.HourlySeries) != 2 {
 		t.Fatalf("len(HourlySeries) = %d, want 2", len(overview.HourlySeries))
+	}
+}
+
+func TestStoreListCredentialsSeparatesProvidersAndResolvesDisplay(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newTestStore(t, ctx)
+	ts := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	for _, event := range []Event{
+		{EventKey: "openai", Timestamp: ts, Provider: "openai", Source: "alice@example.com", SourceHash: "src_a", AuthIndex: "3", AuthIDHash: "auth_a", AuthType: "oauth", TotalTokens: 10, CreatedAt: ts},
+		{EventKey: "claude", Timestamp: ts, Provider: "claude", Source: "alice@example.com", SourceHash: "src_a", AuthIndex: "3", AuthIDHash: "auth_a", AuthType: "oauth", TotalTokens: 20, CreatedAt: ts},
+	} {
+		if err := store.InsertEvent(ctx, event); err != nil {
+			t.Fatalf("InsertEvent(%s) error = %v", event.EventKey, err)
+		}
+	}
+
+	rows, err := store.ListCredentials(ctx, QueryFilter{})
+	if err != nil {
+		t.Fatalf("ListCredentials() error = %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want provider-separated rows: %+v", len(rows), rows)
+	}
+	got := map[string]CredentialRow{}
+	for _, row := range rows {
+		got[row.Provider] = row
+		if strings.Contains(row.SourceDisplay, "alice@example.com") {
+			t.Fatalf("SourceDisplay exposed raw source: %q", row.SourceDisplay)
+		}
+		if row.SourceType != "oauth" || row.SourceKey != "src_a" {
+			t.Fatalf("row source metadata = type %q key %q, want oauth/src_a", row.SourceType, row.SourceKey)
+		}
+	}
+	if got["openai"].SourceDisplay != "OpenAI · OAuth · a***@example.com" {
+		t.Fatalf("openai SourceDisplay = %q", got["openai"].SourceDisplay)
+	}
+	if got["claude"].SourceDisplay != "Claude · OAuth · a***@example.com" {
+		t.Fatalf("claude SourceDisplay = %q", got["claude"].SourceDisplay)
+	}
+	if got["openai"].TotalTokens != 10 || got["claude"].TotalTokens != 20 {
+		t.Fatalf("provider totals not separated: %+v", got)
 	}
 }
 

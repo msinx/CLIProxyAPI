@@ -54,8 +54,8 @@ func TestPluginConvertsUsageRecordToEventAndHashesSensitiveFields(t *testing.T) 
 	if event.TotalTokens != 33 {
 		t.Fatalf("TotalTokens = %d, want normalized total 33", event.TotalTokens)
 	}
-	if event.SourceDisplay != "a***@example.com" {
-		t.Fatalf("SourceDisplay = %q, want masked email", event.SourceDisplay)
+	if event.SourceDisplay != "OpenAI · API key · a***@example.com" {
+		t.Fatalf("SourceDisplay = %q, want enriched masked email", event.SourceDisplay)
 	}
 
 	var apiKeyHash, sourceHash, authIDHash, apiGroupKey string
