@@ -53,6 +53,8 @@ type EventView struct {
 	ReasoningTokens int64     `json:"reasoning_tokens"`
 	CachedTokens    int64     `json:"cached_tokens"`
 	TotalTokens     int64     `json:"total_tokens"`
+	EstimatedCost   float64   `json:"estimated_cost,omitempty"`
+	CostAvailable   bool      `json:"cost_available,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
@@ -84,6 +86,8 @@ type Summary struct {
 	AverageLatencyMS float64 `json:"average_latency_ms"`
 	RPM              float64 `json:"rpm"`
 	TPM              float64 `json:"tpm"`
+	TotalCost        float64 `json:"total_cost,omitempty"`
+	CostAvailable    bool    `json:"cost_available,omitempty"`
 }
 
 type BreakdownRow struct {
@@ -99,6 +103,8 @@ type BreakdownRow struct {
 	ReasoningTokens  int64   `json:"reasoning_tokens"`
 	CachedTokens     int64   `json:"cached_tokens"`
 	AverageLatencyMS float64 `json:"average_latency_ms"`
+	TotalCost        float64 `json:"total_cost,omitempty"`
+	CostAvailable    bool    `json:"cost_available,omitempty"`
 }
 
 type CredentialRow struct {
@@ -132,6 +138,8 @@ type TimeBucket struct {
 	OutputTokens    int64     `json:"output_tokens"`
 	ReasoningTokens int64     `json:"reasoning_tokens"`
 	CachedTokens    int64     `json:"cached_tokens"`
+	TotalCost       float64   `json:"total_cost,omitempty"`
+	CostAvailable   bool      `json:"cost_available,omitempty"`
 }
 
 type Overview struct {

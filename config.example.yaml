@@ -100,6 +100,14 @@ usage-sqlite-backup-path: ./data/usage-backups
 # SQLite usage backup retention in days. Set to 0 to keep only current-day backups.
 usage-sqlite-backup-retention-days: 7
 
+# Optional per-model usage prices for estimated dashboard costs.
+# Prices are charged per 1M tokens. Reasoning tokens are tracked separately and are not charged here.
+# usage-model-prices:
+#   gpt-5.4:
+#     prompt-price-per-1m: 1.25
+#     completion-price-per-1m: 10
+#     cache-price-per-1m: 0.125
+
 # How long (in seconds) Redis usage queue items are retained in memory for the RESP interface (LPOP/RPOP).
 # Default: 60. Max: 3600.
 redis-usage-queue-retention-seconds: 60

@@ -76,8 +76,9 @@
 - `usage-sqlite-backup-enabled`：默认 `false`，开启后 maintenance 会生成 SQLite 备份。
 - `usage-sqlite-backup-path`：默认 `./data/usage-backups`。
 - `usage-sqlite-backup-retention-days`：默认 `7`。
+- `usage-model-prices`：可选模型价格表，用于 usage dashboard 估算成本。价格单位是每 1M tokens，字段为 `prompt-price-per-1m`、`completion-price-per-1m`、`cache-price-per-1m`。reasoning tokens 只做统计，不额外计费；未配置价格的模型会让对应区间显示为成本不完整，但已配置模型的 subtotal 仍会返回。
 
-参考 `Willxup/cpa-usage-keeper` 后，本 fork 仍保持进程内 SQLite 方案，不引入独立 usage 服务、Redis inbox、登录态或 Docker 部署面。已吸收的可靠性改动是：SQLite plugin flush 使用事务批量写入；maintenance 会定期执行 retention cleanup、WAL checkpoint、删除数据后的 vacuum；可选开启 SQLite `VACUUM INTO` 备份和备份保留清理。已吸收的展示改动是：credential/source display 在查询层根据 `provider`、`auth_type`、`auth_index` 和脱敏 source 生成更可读标签，并让 credential health 按 provider 拆分，避免不同 provider 的相同 source/hash 被合并。后续如果要继续补齐独立项目能力，优先顺序建议是价格/成本分析、服务健康时间线，而不是把独立服务整体搬进后端。
+参考 `Willxup/cpa-usage-keeper` 后，本 fork 仍保持进程内 SQLite 方案，不引入独立 usage 服务、Redis inbox、登录态或 Docker 部署面。已吸收的可靠性改动是：SQLite plugin flush 使用事务批量写入；maintenance 会定期执行 retention cleanup、WAL checkpoint、删除数据后的 vacuum；可选开启 SQLite `VACUUM INTO` 备份和备份保留清理。已吸收的展示改动是：credential/source display 在查询层根据 `provider`、`auth_type`、`auth_index` 和脱敏 source 生成更可读标签，并让 credential health 按 provider 拆分，避免不同 provider 的相同 source/hash 被合并。已吸收的成本分析改动是：后端按 `usage-model-prices` 计算 summary、breakdown、trend bucket 和 event 的 estimated cost，前端只展示结果，不提供价格编辑器。后续如果要继续补齐独立项目能力，优先顺序建议是服务健康时间线，而不是把独立服务整体搬进后端。
 
 管理面板资产源配置：
 
@@ -314,6 +315,7 @@ git remote show upstream
 - plugin flush 是否仍使用 `InsertEvents` 事务批量写入，不要退回逐条写入。
 - maintenance worker 是否仍按配置执行 retention、checkpoint、vacuum 和可选 backup。
 - credential/source display 是否仍只返回脱敏后的 `source_display`，并保留 `source_type`、`source_key`、credential `provider` 这些向后兼容字段。
+- `usage-model-prices` 是否仍被配置清洗、热更新同步到 `usagesqlite.Store`，并让 overview / analysis / events 返回成本字段。
 - `internal/managementasset/updater.go` 是否仍默认指向 `msinx/Cli-Proxy-API-Management-Center`。
 - fallback management asset URL 是否仍保持禁用，避免回退到官方前端。
 

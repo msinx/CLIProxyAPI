@@ -99,6 +99,9 @@ type Config struct {
 	// UsageSQLiteBackupRetentionDays controls backup cleanup. Set to 0 to keep only current-day backups.
 	UsageSQLiteBackupRetentionDays int `yaml:"usage-sqlite-backup-retention-days" json:"usage-sqlite-backup-retention-days"`
 
+	// UsageModelPrices maps model names to per-million-token prices used for usage cost estimates.
+	UsageModelPrices map[string]UsageModelPrice `yaml:"usage-model-prices" json:"usage-model-prices"`
+
 	// RedisUsageQueueRetentionSeconds controls how long (in seconds) usage queue items
 	// are retained in memory for the Redis RESP interface (LPOP/RPOP).
 	// Default: 60. Max: 3600.
@@ -218,6 +221,13 @@ type PprofConfig struct {
 	Enable bool `yaml:"enable" json:"enable"`
 	// Addr is the host:port address for the pprof HTTP server.
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+// UsageModelPrice holds per-million-token rates for usage cost estimates.
+type UsageModelPrice struct {
+	PromptPricePer1M     float64 `yaml:"prompt-price-per-1m" json:"prompt-price-per-1m"`
+	CompletionPricePer1M float64 `yaml:"completion-price-per-1m" json:"completion-price-per-1m"`
+	CachePricePer1M      float64 `yaml:"cache-price-per-1m" json:"cache-price-per-1m"`
 }
 
 // RemoteManagement holds management API configuration under 'remote-management'.
@@ -754,6 +764,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.UsageSQLiteBackupRetentionDays < 0 {
 		cfg.UsageSQLiteBackupRetentionDays = 0
 	}
+	cfg.UsageModelPrices = sanitizeUsageModelPrices(cfg.UsageModelPrices)
 
 	if cfg.MaxRetryCredentials < 0 {
 		cfg.MaxRetryCredentials = 0
@@ -1027,6 +1038,33 @@ func normalizeModelPrefix(prefix string) string {
 // looksLikeBcrypt returns true if the provided string appears to be a bcrypt hash.
 func looksLikeBcrypt(s string) bool {
 	return len(s) > 4 && (s[:4] == "$2a$" || s[:4] == "$2b$" || s[:4] == "$2y$")
+}
+
+func sanitizeUsageModelPrices(prices map[string]UsageModelPrice) map[string]UsageModelPrice {
+	if len(prices) == 0 {
+		return nil
+	}
+	sanitized := make(map[string]UsageModelPrice, len(prices))
+	for model, price := range prices {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		if price.PromptPricePer1M < 0 {
+			price.PromptPricePer1M = 0
+		}
+		if price.CompletionPricePer1M < 0 {
+			price.CompletionPricePer1M = 0
+		}
+		if price.CachePricePer1M < 0 {
+			price.CachePricePer1M = 0
+		}
+		sanitized[model] = price
+	}
+	if len(sanitized) == 0 {
+		return nil
+	}
+	return sanitized
 }
 
 // NormalizeHeaders trims header keys and values and removes empty pairs.

@@ -979,6 +979,7 @@ func (s *Server) initUsageSQLite(cfg *config.Config) {
 		return
 	}
 	store := usagesqlite.NewStore(db)
+	store.SetModelPrices(usageModelPricesFromConfig(cfg))
 	salt, err := usagesqlite.ResolveSalt(cfg, s.configFilePath)
 	if err != nil {
 		log.WithError(err).Warn("sqlite usage store disabled: failed to resolve usage salt")
@@ -1019,6 +1020,21 @@ func resolveUsagePathFromConfig(pathValue, configFilePath string) string {
 		}
 	}
 	return resolved
+}
+
+func usageModelPricesFromConfig(cfg *config.Config) map[string]usagesqlite.ModelPrice {
+	if cfg == nil || len(cfg.UsageModelPrices) == 0 {
+		return nil
+	}
+	prices := make(map[string]usagesqlite.ModelPrice, len(cfg.UsageModelPrices))
+	for model, price := range cfg.UsageModelPrices {
+		prices[model] = usagesqlite.ModelPrice{
+			PromptPricePer1M:     price.PromptPricePer1M,
+			CompletionPricePer1M: price.CompletionPricePer1M,
+			CachePricePer1M:      price.CachePricePer1M,
+		}
+	}
+	return prices
 }
 
 // corsMiddleware returns a Gin middleware handler that adds CORS headers
@@ -1095,6 +1111,9 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 		oldCfg.UsageStatisticsEnabled != cfg.UsageStatisticsEnabled ||
 		oldCfg.UsageSQLiteEnabled != cfg.UsageSQLiteEnabled) {
 		s.usageSQLitePlugin.SetEnabled(cfg.UsageStatisticsEnabled && cfg.UsageSQLiteEnabled)
+	}
+	if s.usageSQLiteStore != nil && (oldCfg == nil || !reflect.DeepEqual(oldCfg.UsageModelPrices, cfg.UsageModelPrices)) {
+		s.usageSQLiteStore.SetModelPrices(usageModelPricesFromConfig(cfg))
 	}
 
 	if oldCfg == nil || oldCfg.RedisUsageQueueRetentionSeconds != cfg.RedisUsageQueueRetentionSeconds {

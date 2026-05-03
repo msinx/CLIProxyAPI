@@ -115,12 +115,19 @@ func TestBuildConfigChangeDetails_UsageSQLiteMaintenance(t *testing.T) {
 		UsageSQLiteBackupEnabled:       false,
 		UsageSQLiteBackupPath:          "./old-backups",
 		UsageSQLiteBackupRetentionDays: 7,
+		UsageModelPrices: map[string]config.UsageModelPrice{
+			"old": {PromptPricePer1M: 1},
+		},
 	}
 	newCfg := &config.Config{
 		UsageSQLiteMaintenanceInterval: 48 * time.Hour,
 		UsageSQLiteBackupEnabled:       true,
 		UsageSQLiteBackupPath:          "./new-backups",
 		UsageSQLiteBackupRetentionDays: 14,
+		UsageModelPrices: map[string]config.UsageModelPrice{
+			"new": {PromptPricePer1M: 2},
+			"alt": {PromptPricePer1M: 3},
+		},
 	}
 
 	changes := BuildConfigChangeDetails(oldCfg, newCfg)
@@ -128,6 +135,7 @@ func TestBuildConfigChangeDetails_UsageSQLiteMaintenance(t *testing.T) {
 	expectContains(t, changes, "usage-sqlite-backup-enabled: false -> true")
 	expectContains(t, changes, "usage-sqlite-backup-path: ./old-backups -> ./new-backups")
 	expectContains(t, changes, "usage-sqlite-backup-retention-days: 7 -> 14")
+	expectContains(t, changes, "usage-model-prices: updated (1 -> 2 entries)")
 }
 
 func TestBuildConfigChangeDetails_GeminiVertexHeadersAndForceMappings(t *testing.T) {

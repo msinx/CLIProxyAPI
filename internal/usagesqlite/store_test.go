@@ -292,6 +292,109 @@ func TestStoreOverviewAppliesFiltersAndComputesSummary(t *testing.T) {
 	}
 }
 
+func TestStoreCostAnalyticsUsesConfiguredModelPrices(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newTestStore(t, ctx)
+	store.SetModelPrices(map[string]ModelPrice{
+		"gpt-5.4": {
+			PromptPricePer1M:     1,
+			CompletionPricePer1M: 10,
+			CachePricePer1M:      0.5,
+		},
+	})
+	base := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	events := []Event{
+		{EventKey: "priced-1", RequestID: "priced-1", Timestamp: base, Provider: "openai", Model: "gpt-5.4", InputTokens: 1_000_000, OutputTokens: 500_000, CachedTokens: 200_000, ReasoningTokens: 9_000_000, TotalTokens: 10_700_000, CreatedAt: base},
+		{EventKey: "priced-2", RequestID: "priced-2", Timestamp: base.Add(time.Hour), Provider: "openai", Model: "gpt-5.4", InputTokens: 100_000, OutputTokens: 100_000, CachedTokens: 0, TotalTokens: 200_000, CreatedAt: base},
+	}
+	for _, event := range events {
+		if err := store.InsertEvent(ctx, event); err != nil {
+			t.Fatalf("InsertEvent(%s) error = %v", event.EventKey, err)
+		}
+	}
+
+	overview, err := store.GetOverview(ctx, QueryFilter{})
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	if !overview.Summary.CostAvailable {
+		t.Fatalf("Summary.CostAvailable = false, want true")
+	}
+	if !floatEquals(overview.Summary.TotalCost, 7.2) {
+		t.Fatalf("Summary.TotalCost = %v, want 7.2", overview.Summary.TotalCost)
+	}
+	if len(overview.Models) != 1 || !overview.Models[0].CostAvailable || !floatEquals(overview.Models[0].TotalCost, 7.2) {
+		t.Fatalf("model cost row = %+v, want available total 7.2", overview.Models)
+	}
+	if len(overview.HourlySeries) != 2 || !floatEquals(overview.HourlySeries[0].TotalCost, 6.1) ||
+		!overview.HourlySeries[0].CostAvailable || !floatEquals(overview.HourlySeries[1].TotalCost, 1.1) {
+		t.Fatalf("hourly cost series = %+v, want per-bucket costs", overview.HourlySeries)
+	}
+
+	page, err := store.ListEvents(ctx, QueryFilter{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	if len(page.Events) != 2 {
+		t.Fatalf("len(Events) = %d, want 2", len(page.Events))
+	}
+	for _, event := range page.Events {
+		if !event.CostAvailable {
+			t.Fatalf("event %s CostAvailable = false, want true", event.RequestID)
+		}
+	}
+	if !floatEquals(page.Events[0].EstimatedCost, 1.1) || !floatEquals(page.Events[1].EstimatedCost, 6.1) {
+		t.Fatalf("event costs = %+v, want newest 1.1 and oldest 6.1", page.Events)
+	}
+}
+
+func TestStoreCostAnalyticsReportsPartialPricing(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newTestStore(t, ctx)
+	store.SetModelPrices(map[string]ModelPrice{
+		"priced": {PromptPricePer1M: 1},
+	})
+	ts := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	for _, event := range []Event{
+		{EventKey: "priced", RequestID: "priced", Timestamp: ts, Provider: "openai", Model: "priced", InputTokens: 1_000_000, TotalTokens: 1_000_000, CreatedAt: ts},
+		{EventKey: "unpriced", RequestID: "unpriced", Timestamp: ts, Provider: "openai", Model: "unpriced", InputTokens: 1_000_000, TotalTokens: 1_000_000, CreatedAt: ts},
+	} {
+		if err := store.InsertEvent(ctx, event); err != nil {
+			t.Fatalf("InsertEvent(%s) error = %v", event.EventKey, err)
+		}
+	}
+
+	overview, err := store.GetOverview(ctx, QueryFilter{})
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	if overview.Summary.CostAvailable {
+		t.Fatalf("Summary.CostAvailable = true, want false for partially priced range")
+	}
+	if !floatEquals(overview.Summary.TotalCost, 1) {
+		t.Fatalf("Summary.TotalCost = %v, want priced subtotal 1", overview.Summary.TotalCost)
+	}
+
+	page, err := store.ListEvents(ctx, QueryFilter{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	byRequest := map[string]EventView{}
+	for _, event := range page.Events {
+		byRequest[event.RequestID] = event
+	}
+	if !byRequest["priced"].CostAvailable || !floatEquals(byRequest["priced"].EstimatedCost, 1) {
+		t.Fatalf("priced event cost = %+v, want available subtotal 1", byRequest["priced"])
+	}
+	if byRequest["unpriced"].CostAvailable || byRequest["unpriced"].EstimatedCost != 0 {
+		t.Fatalf("unpriced event cost = %+v, want unavailable zero", byRequest["unpriced"])
+	}
+}
+
 func TestStoreListCredentialsSeparatesProvidersAndResolvesDisplay(t *testing.T) {
 	t.Parallel()
 
@@ -347,4 +450,12 @@ func newTestStore(t *testing.T, ctx context.Context) *Store {
 		}
 	})
 	return NewStore(db)
+}
+
+func floatEquals(got, want float64) bool {
+	const epsilon = 0.0000001
+	if got > want {
+		return got-want < epsilon
+	}
+	return want-got < epsilon
 }
