@@ -39,6 +39,8 @@ type EventView struct {
 	Endpoint        string    `json:"endpoint"`
 	APIGroupKey     string    `json:"api_group_key"`
 	SourceDisplay   string    `json:"source_display"`
+	SourceType      string    `json:"source_type,omitempty"`
+	SourceKey       string    `json:"source_key,omitempty"`
 	SourceHash      string    `json:"source_hash"`
 	AuthIndex       string    `json:"auth_index"`
 	AuthIDHash      string    `json:"auth_id_hash"`
@@ -100,7 +102,10 @@ type BreakdownRow struct {
 }
 
 type CredentialRow struct {
+	Provider         string  `json:"provider,omitempty"`
 	SourceDisplay    string  `json:"source_display"`
+	SourceType       string  `json:"source_type,omitempty"`
+	SourceKey        string  `json:"source_key,omitempty"`
 	SourceHash       string  `json:"source_hash"`
 	AuthIndex        string  `json:"auth_index"`
 	AuthIDHash       string  `json:"auth_id_hash"`
@@ -153,6 +158,8 @@ type EventsPage struct {
 }
 
 type SourceOption struct {
-	Display string `json:"display"`
-	Hash    string `json:"hash"`
+	Display    string `json:"display"`
+	Hash       string `json:"hash"`
+	SourceType string `json:"source_type,omitempty"`
+	SourceKey  string `json:"source_key,omitempty"`
 }

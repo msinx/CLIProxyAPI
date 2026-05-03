@@ -242,6 +242,7 @@ func (s *Store) ListEvents(ctx context.Context, filter QueryFilter) (EventsPage,
 func (s *Store) ListCredentials(ctx context.Context, filter QueryFilter) ([]CredentialRow, error) {
 	where, args := buildWhere(filter)
 	rows, err := s.db.sqlDB.QueryContext(ctx, `SELECT
+		provider,
 		source,
 		source_hash,
 		auth_index,
@@ -257,8 +258,8 @@ func (s *Store) ListCredentials(ctx context.Context, filter QueryFilter) ([]Cred
 		COALESCE(SUM(total_tokens), 0) AS total_tokens,
 		COALESCE(AVG(CASE WHEN latency_ms > 0 THEN latency_ms ELSE NULL END), 0) AS average_latency_ms
 		FROM usage_events `+where+`
-		GROUP BY source_hash, auth_index, auth_id_hash, auth_type
-		ORDER BY request_count DESC, source_hash ASC, auth_index ASC, auth_id_hash ASC
+		GROUP BY provider, source_hash, auth_index, auth_id_hash, auth_type
+		ORDER BY request_count DESC, provider ASC, source_hash ASC, auth_index ASC, auth_id_hash ASC
 		LIMIT 500`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite usage credentials: %w", err)
@@ -270,6 +271,7 @@ func (s *Store) ListCredentials(ctx context.Context, filter QueryFilter) ([]Cred
 		var row CredentialRow
 		var source string
 		if errScan := rows.Scan(
+			&row.Provider,
 			&source,
 			&row.SourceHash,
 			&row.AuthIndex,
@@ -287,7 +289,9 @@ func (s *Store) ListCredentials(ctx context.Context, filter QueryFilter) ([]Cred
 		); errScan != nil {
 			return nil, fmt.Errorf("scan sqlite usage credential: %w", errScan)
 		}
-		row.SourceDisplay = maskSource(source)
+		row.SourceDisplay = credentialSourceDisplay(row.Provider, row.AuthType, row.AuthIndex, source)
+		row.SourceType = normalizeSourceType(row.AuthType)
+		row.SourceKey = row.SourceHash
 		if row.RequestCount > 0 {
 			row.SuccessRate = float64(row.SuccessCount) / float64(row.RequestCount)
 		}
@@ -412,19 +416,26 @@ func (s *Store) listDistinct(ctx context.Context, filter QueryFilter, column str
 
 func (s *Store) listSources(ctx context.Context, filter QueryFilter) ([]SourceOption, error) {
 	where, args := buildWhere(filter)
-	rows, err := s.db.sqlDB.QueryContext(ctx, `SELECT source, source_hash FROM usage_events `+where+`
-		AND source_hash != '' GROUP BY source_hash ORDER BY MAX(timestamp) DESC LIMIT 500`, args...)
+	rows, err := s.db.sqlDB.QueryContext(ctx, `SELECT source, source_hash, provider, auth_type, auth_index
+		FROM usage_events WHERE id IN (
+			SELECT MAX(id) FROM usage_events `+where+` AND source_hash != '' GROUP BY source_hash
+		) ORDER BY timestamp DESC LIMIT 500`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite usage source options: %w", err)
 	}
 	defer closeRows(rows)
 	out := []SourceOption{}
 	for rows.Next() {
-		var source, hash string
-		if errScan := rows.Scan(&source, &hash); errScan != nil {
+		var source, hash, provider, authType, authIndex string
+		if errScan := rows.Scan(&source, &hash, &provider, &authType, &authIndex); errScan != nil {
 			return nil, fmt.Errorf("scan sqlite usage source option: %w", errScan)
 		}
-		out = append(out, SourceOption{Display: maskSource(source), Hash: hash})
+		out = append(out, SourceOption{
+			Display:    credentialSourceDisplay(provider, authType, authIndex, source),
+			Hash:       hash,
+			SourceType: normalizeSourceType(authType),
+			SourceKey:  hash,
+		})
 	}
 	return out, rows.Err()
 }
@@ -478,7 +489,9 @@ func eventView(event Event) EventView {
 		Model:           event.Model,
 		Endpoint:        event.Endpoint,
 		APIGroupKey:     event.APIGroupKey,
-		SourceDisplay:   maskSource(event.Source),
+		SourceDisplay:   credentialSourceDisplay(event.Provider, event.AuthType, event.AuthIndex, event.Source),
+		SourceType:      normalizeSourceType(event.AuthType),
+		SourceKey:       event.SourceHash,
 		SourceHash:      event.SourceHash,
 		AuthIndex:       event.AuthIndex,
 		AuthIDHash:      event.AuthIDHash,
@@ -515,6 +528,70 @@ func maskSource(source string) string {
 		return source[:1] + "..." + source[len(source)-1:]
 	}
 	return source[:4] + "..." + source[len(source)-4:]
+}
+
+func credentialSourceDisplay(provider, authType, authIndex, source string) string {
+	parts := make([]string, 0, 3)
+	if displayProvider := providerDisplayName(provider); displayProvider != "" {
+		parts = append(parts, displayProvider)
+	}
+	if displayType := authTypeDisplayName(authType); displayType != "" {
+		parts = append(parts, displayType)
+	}
+	if masked := maskSource(source); masked != "" {
+		parts = append(parts, masked)
+	} else if idx := strings.TrimSpace(authIndex); idx != "" {
+		parts = append(parts, "credential #"+idx)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func providerDisplayName(provider string) string {
+	switch normalized := strings.ToLower(strings.TrimSpace(provider)); normalized {
+	case "":
+		return ""
+	case "openai":
+		return "OpenAI"
+	case "claude":
+		return "Claude"
+	case "gemini":
+		return "Gemini"
+	case "gemini-cli":
+		return "Gemini CLI"
+	case "codex":
+		return "Codex"
+	case "vertex":
+		return "Vertex"
+	case "antigravity":
+		return "Antigravity"
+	case "kimi":
+		return "Kimi"
+	case "aistudio":
+		return "AI Studio"
+	default:
+		return provider
+	}
+}
+
+func authTypeDisplayName(authType string) string {
+	switch normalizeSourceType(authType) {
+	case "":
+		return ""
+	case "oauth":
+		return "OAuth"
+	case "api_key":
+		return "API key"
+	default:
+		return strings.TrimSpace(authType)
+	}
+}
+
+func normalizeSourceType(authType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(authType))
+	if normalized == "apikey" || normalized == "api-key" {
+		return "api_key"
+	}
+	return normalized
 }
 
 func finalizeSummary(summary *Summary, filter QueryFilter) {

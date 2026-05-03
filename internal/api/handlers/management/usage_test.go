@@ -107,8 +107,8 @@ func TestListUsageCredentialsIncludesSourceAndAuthIndex(t *testing.T) {
 	if body[0].SourceHash != "src_a" || body[0].AuthIndex != "3" || body[0].AuthIDHash != "auth_a" || body[0].AuthType != "oauth" {
 		t.Fatalf("credential row missing identity fields: %+v", body[0])
 	}
-	if body[0].SourceDisplay != "a***@example.com" {
-		t.Fatalf("SourceDisplay = %q, want masked email", body[0].SourceDisplay)
+	if body[0].SourceDisplay != "OAuth · a***@example.com" {
+		t.Fatalf("SourceDisplay = %q, want enriched masked email", body[0].SourceDisplay)
 	}
 	if body[0].FailureCount != 1 {
 		t.Fatalf("FailureCount = %d, want 1", body[0].FailureCount)
