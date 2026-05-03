@@ -193,6 +193,14 @@ func (h *Handler) PutUsageStatisticsEnabled(c *gin.Context) {
 	h.updateBoolField(c, func(v bool) { h.cfg.UsageStatisticsEnabled = v })
 }
 
+// UsageSQLiteEnabled
+func (h *Handler) GetUsageSQLiteEnabled(c *gin.Context) {
+	c.JSON(200, gin.H{"usage-sqlite-enabled": h.cfg.UsageSQLiteEnabled})
+}
+func (h *Handler) PutUsageSQLiteEnabled(c *gin.Context) {
+	h.updateBoolField(c, func(v bool) { h.cfg.UsageSQLiteEnabled = v })
+}
+
 // UsageStatisticsEnabled
 func (h *Handler) GetLoggingToFile(c *gin.Context) {
 	c.JSON(200, gin.H{"logging-to-file": h.cfg.LoggingToFile})

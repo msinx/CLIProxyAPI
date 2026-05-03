@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	log "github.com/sirupsen/logrus"
@@ -20,7 +21,7 @@ import (
 )
 
 const (
-	DefaultPanelGitHubRepository = "https://github.com/router-for-me/Cli-Proxy-API-Management-Center"
+	DefaultPanelGitHubRepository = "https://github.com/msinx/Cli-Proxy-API-Management-Center"
 	DefaultPprofAddr             = "127.0.0.1:8316"
 )
 
@@ -62,8 +63,29 @@ type Config struct {
 	// When exceeded, the oldest error log files are deleted. Default is 10. Set to 0 to disable cleanup.
 	ErrorLogsMaxFiles int `yaml:"error-logs-max-files" json:"error-logs-max-files"`
 
-	// UsageStatisticsEnabled toggles in-memory usage aggregation; when false, usage data is discarded.
+	// UsageStatisticsEnabled toggles usage emission; when false, all usage consumers are disabled.
 	UsageStatisticsEnabled bool `yaml:"usage-statistics-enabled" json:"usage-statistics-enabled"`
+
+	// UsageSQLiteEnabled toggles the built-in SQLite usage store.
+	UsageSQLiteEnabled bool `yaml:"usage-sqlite-enabled" json:"usage-sqlite-enabled"`
+
+	// UsageSQLitePath is the SQLite database path for built-in usage events.
+	UsageSQLitePath string `yaml:"usage-sqlite-path" json:"usage-sqlite-path"`
+
+	// UsageRetentionDays controls automatic usage event cleanup. Set to 0 to disable.
+	UsageRetentionDays int `yaml:"usage-retention-days" json:"usage-retention-days"`
+
+	// UsageAPIKeySalt is the optional stable HMAC salt for usage identity hashes.
+	UsageAPIKeySalt string `yaml:"usage-api-key-salt" json:"-"`
+
+	// UsageSQLiteBufferSize controls the built-in SQLite usage writer queue.
+	UsageSQLiteBufferSize int `yaml:"usage-sqlite-buffer-size" json:"usage-sqlite-buffer-size"`
+
+	// UsageSQLiteBatchSize controls how many usage events are flushed per batch.
+	UsageSQLiteBatchSize int `yaml:"usage-sqlite-batch-size" json:"usage-sqlite-batch-size"`
+
+	// UsageSQLiteFlushInterval controls the maximum interval between SQLite usage flushes.
+	UsageSQLiteFlushInterval time.Duration `yaml:"usage-sqlite-flush-interval" json:"usage-sqlite-flush-interval"`
 
 	// RedisUsageQueueRetentionSeconds controls how long (in seconds) usage queue items
 	// are retained in memory for the Redis RESP interface (LPOP/RPOP).
@@ -613,7 +635,13 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.LoggingToFile = false
 	cfg.LogsMaxTotalSizeMB = 0
 	cfg.ErrorLogsMaxFiles = 10
-	cfg.UsageStatisticsEnabled = false
+	cfg.UsageStatisticsEnabled = true
+	cfg.UsageSQLiteEnabled = true
+	cfg.UsageSQLitePath = "./data/usage.db"
+	cfg.UsageRetentionDays = 30
+	cfg.UsageSQLiteBufferSize = 4096
+	cfg.UsageSQLiteBatchSize = 100
+	cfg.UsageSQLiteFlushInterval = time.Second
 	cfg.RedisUsageQueueRetentionSeconds = 60
 	cfg.DisableCooling = false
 	cfg.DisableImageGeneration = DisableImageGenerationOff
@@ -682,6 +710,23 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	} else if cfg.RedisUsageQueueRetentionSeconds > 3600 {
 		log.WithField("value", cfg.RedisUsageQueueRetentionSeconds).Warn("redis-usage-queue-retention-seconds too large; clamping to 3600")
 		cfg.RedisUsageQueueRetentionSeconds = 3600
+	}
+
+	cfg.UsageSQLitePath = strings.TrimSpace(cfg.UsageSQLitePath)
+	if cfg.UsageSQLitePath == "" {
+		cfg.UsageSQLitePath = "./data/usage.db"
+	}
+	if cfg.UsageRetentionDays < 0 {
+		cfg.UsageRetentionDays = 0
+	}
+	if cfg.UsageSQLiteBufferSize <= 0 {
+		cfg.UsageSQLiteBufferSize = 4096
+	}
+	if cfg.UsageSQLiteBatchSize <= 0 {
+		cfg.UsageSQLiteBatchSize = 100
+	}
+	if cfg.UsageSQLiteFlushInterval <= 0 {
+		cfg.UsageSQLiteFlushInterval = time.Second
 	}
 
 	if cfg.MaxRetryCredentials < 0 {
