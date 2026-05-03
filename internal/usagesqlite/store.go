@@ -1,0 +1,547 @@
+package usagesqlite
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"math"
+	"strings"
+	"time"
+)
+
+type Store struct {
+	db *DB
+}
+
+func NewStore(db *DB) *Store {
+	return &Store{db: db}
+}
+
+func (s *Store) InsertEvent(ctx context.Context, event Event) error {
+	if s == nil || s.db == nil || s.db.sqlDB == nil {
+		return fmt.Errorf("sqlite usage store is not initialized")
+	}
+	now := time.Now()
+	if event.Timestamp.IsZero() {
+		event.Timestamp = now
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = now
+	}
+	event.EventKey = strings.TrimSpace(event.EventKey)
+	if event.EventKey == "" {
+		return fmt.Errorf("usage event key is empty")
+	}
+	if event.TotalTokens == 0 {
+		event.TotalTokens = event.InputTokens + event.OutputTokens + event.ReasoningTokens
+	}
+	if event.TotalTokens == 0 {
+		event.TotalTokens = event.InputTokens + event.OutputTokens + event.ReasoningTokens + event.CachedTokens
+	}
+	_, err := s.db.sqlDB.ExecContext(ctx, `INSERT OR IGNORE INTO usage_events (
+		event_key, request_id, timestamp, provider, model, endpoint, api_group_key, source,
+		source_hash, auth_index, auth_id_hash, auth_type, api_key_hash, failed, status_code,
+		latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.EventKey,
+		event.RequestID,
+		event.Timestamp.Unix(),
+		event.Provider,
+		event.Model,
+		event.Endpoint,
+		event.APIGroupKey,
+		event.Source,
+		event.SourceHash,
+		event.AuthIndex,
+		event.AuthIDHash,
+		event.AuthType,
+		event.APIKeyHash,
+		boolToInt(event.Failed),
+		event.StatusCode,
+		event.LatencyMS,
+		event.InputTokens,
+		event.OutputTokens,
+		event.ReasoningTokens,
+		event.CachedTokens,
+		event.TotalTokens,
+		event.CreatedAt.Unix(),
+	)
+	if err != nil {
+		return fmt.Errorf("insert sqlite usage event: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetOverview(ctx context.Context, filter QueryFilter) (Overview, error) {
+	overview := Overview{
+		HourlySeries: []TimeBucket{},
+		DailySeries:  []TimeBucket{},
+		Models:       []BreakdownRow{},
+		Providers:    []BreakdownRow{},
+		APIKeys:      []BreakdownRow{},
+		Timezone:     time.Local.String(),
+	}
+	where, args := buildWhere(filter)
+	row := s.db.sqlDB.QueryRowContext(ctx, `SELECT
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(reasoning_tokens), 0),
+		COALESCE(SUM(cached_tokens), 0),
+		COALESCE(SUM(total_tokens), 0),
+		COALESCE(AVG(CASE WHEN latency_ms > 0 THEN latency_ms ELSE NULL END), 0)
+		FROM usage_events `+where, args...)
+	if err := row.Scan(
+		&overview.Summary.RequestCount,
+		&overview.Summary.SuccessCount,
+		&overview.Summary.FailureCount,
+		&overview.Summary.InputTokens,
+		&overview.Summary.OutputTokens,
+		&overview.Summary.ReasoningTokens,
+		&overview.Summary.CachedTokens,
+		&overview.Summary.TotalTokens,
+		&overview.Summary.AverageLatencyMS,
+	); err != nil {
+		return overview, fmt.Errorf("query sqlite usage overview: %w", err)
+	}
+	finalizeSummary(&overview.Summary, filter)
+
+	var err error
+	overview.HourlySeries, err = s.listBuckets(ctx, filter, 3600)
+	if err != nil {
+		return overview, err
+	}
+	overview.DailySeries, err = s.listBuckets(ctx, filter, 86400)
+	if err != nil {
+		return overview, err
+	}
+	overview.Models, err = s.breakdown(ctx, filter, "model")
+	if err != nil {
+		return overview, err
+	}
+	overview.Providers, err = s.breakdown(ctx, filter, "provider")
+	if err != nil {
+		return overview, err
+	}
+	overview.APIKeys, err = s.breakdown(ctx, filter, "api_group_key")
+	if err != nil {
+		return overview, err
+	}
+	overview.RangeStart = filter.StartTime
+	overview.RangeEnd = filter.EndTime
+	return overview, nil
+}
+
+func (s *Store) GetAnalysis(ctx context.Context, filter QueryFilter) ([]BreakdownRow, []BreakdownRow, error) {
+	providers, err := s.breakdown(ctx, filter, "provider")
+	if err != nil {
+		return nil, nil, err
+	}
+	models, err := s.breakdown(ctx, filter, "model")
+	if err != nil {
+		return nil, nil, err
+	}
+	return providers, models, nil
+}
+
+func (s *Store) ListEvents(ctx context.Context, filter QueryFilter) (EventsPage, error) {
+	page := normalizePage(filter.Page)
+	pageSize := normalizePageSize(filter.PageSize)
+	filter.Page = page
+	filter.PageSize = pageSize
+	where, args := buildWhere(filter)
+
+	var total int64
+	if err := s.db.sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_events `+where, args...).Scan(&total); err != nil {
+		return EventsPage{}, fmt.Errorf("count sqlite usage events: %w", err)
+	}
+
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
+	rows, err := s.db.sqlDB.QueryContext(ctx, `SELECT id, request_id, timestamp, provider, model, endpoint,
+		api_group_key, source, source_hash, auth_index, auth_id_hash, auth_type, failed, status_code,
+		latency_ms, input_tokens, output_tokens, reasoning_tokens, cached_tokens, total_tokens, created_at
+		FROM usage_events `+where+` ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil {
+		return EventsPage{}, fmt.Errorf("list sqlite usage events: %w", err)
+	}
+	defer closeRows(rows)
+
+	events := make([]EventView, 0, pageSize)
+	for rows.Next() {
+		var event Event
+		var failed int
+		var ts, created int64
+		if errScan := rows.Scan(
+			&event.ID, &event.RequestID, &ts, &event.Provider, &event.Model, &event.Endpoint,
+			&event.APIGroupKey, &event.Source, &event.SourceHash, &event.AuthIndex, &event.AuthIDHash,
+			&event.AuthType, &failed, &event.StatusCode, &event.LatencyMS, &event.InputTokens,
+			&event.OutputTokens, &event.ReasoningTokens, &event.CachedTokens, &event.TotalTokens, &created,
+		); errScan != nil {
+			return EventsPage{}, fmt.Errorf("scan sqlite usage event: %w", errScan)
+		}
+		event.Timestamp = time.Unix(ts, 0).UTC()
+		event.CreatedAt = time.Unix(created, 0).UTC()
+		event.Failed = failed != 0
+		events = append(events, eventView(event))
+	}
+	if errRows := rows.Err(); errRows != nil {
+		return EventsPage{}, fmt.Errorf("iterate sqlite usage events: %w", errRows)
+	}
+
+	models, err := s.listDistinct(ctx, filter, "model")
+	if err != nil {
+		return EventsPage{}, err
+	}
+	providers, err := s.listDistinct(ctx, filter, "provider")
+	if err != nil {
+		return EventsPage{}, err
+	}
+	sources, err := s.listSources(ctx, filter)
+	if err != nil {
+		return EventsPage{}, err
+	}
+	return EventsPage{
+		Events:     events,
+		TotalCount: total,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: int(math.Ceil(float64(total) / float64(pageSize))),
+		Models:     models,
+		Providers:  providers,
+		Sources:    sources,
+	}, nil
+}
+
+func (s *Store) ListCredentials(ctx context.Context, filter QueryFilter) ([]CredentialRow, error) {
+	where, args := buildWhere(filter)
+	rows, err := s.db.sqlDB.QueryContext(ctx, `SELECT
+		source,
+		source_hash,
+		auth_index,
+		auth_id_hash,
+		auth_type,
+		COUNT(*) AS request_count,
+		COALESCE(SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END), 0) AS success_count,
+		COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0) AS failure_count,
+		COALESCE(SUM(input_tokens), 0) AS input_tokens,
+		COALESCE(SUM(output_tokens), 0) AS output_tokens,
+		COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+		COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+		COALESCE(SUM(total_tokens), 0) AS total_tokens,
+		COALESCE(AVG(CASE WHEN latency_ms > 0 THEN latency_ms ELSE NULL END), 0) AS average_latency_ms
+		FROM usage_events `+where+`
+		GROUP BY source_hash, auth_index, auth_id_hash, auth_type
+		ORDER BY request_count DESC, source_hash ASC, auth_index ASC, auth_id_hash ASC
+		LIMIT 500`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite usage credentials: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := []CredentialRow{}
+	for rows.Next() {
+		var row CredentialRow
+		var source string
+		if errScan := rows.Scan(
+			&source,
+			&row.SourceHash,
+			&row.AuthIndex,
+			&row.AuthIDHash,
+			&row.AuthType,
+			&row.RequestCount,
+			&row.SuccessCount,
+			&row.FailureCount,
+			&row.InputTokens,
+			&row.OutputTokens,
+			&row.ReasoningTokens,
+			&row.CachedTokens,
+			&row.TotalTokens,
+			&row.AverageLatencyMS,
+		); errScan != nil {
+			return nil, fmt.Errorf("scan sqlite usage credential: %w", errScan)
+		}
+		row.SourceDisplay = maskSource(source)
+		if row.RequestCount > 0 {
+			row.SuccessRate = float64(row.SuccessCount) / float64(row.RequestCount)
+		}
+		out = append(out, row)
+	}
+	if errRows := rows.Err(); errRows != nil {
+		return nil, fmt.Errorf("iterate sqlite usage credentials: %w", errRows)
+	}
+	return out, nil
+}
+
+func (s *Store) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	result, err := s.db.sqlDB.ExecContext(ctx, `DELETE FROM usage_events WHERE timestamp < ?`, cutoff.Unix())
+	if err != nil {
+		return 0, fmt.Errorf("delete old sqlite usage events: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read deleted sqlite usage events count: %w", err)
+	}
+	return rows, nil
+}
+
+func (s *Store) listBuckets(ctx context.Context, filter QueryFilter, seconds int64) ([]TimeBucket, error) {
+	where, args := buildWhere(filter)
+	rows, err := s.db.sqlDB.QueryContext(ctx, fmt.Sprintf(`SELECT
+		(timestamp / %d) * %d AS bucket,
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(reasoning_tokens), 0),
+		COALESCE(SUM(cached_tokens), 0),
+		COALESCE(SUM(total_tokens), 0)
+		FROM usage_events %s GROUP BY bucket ORDER BY bucket ASC`, seconds, seconds, where), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite usage buckets: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := []TimeBucket{}
+	for rows.Next() {
+		var bucketUnix int64
+		var bucket TimeBucket
+		if errScan := rows.Scan(&bucketUnix, &bucket.RequestCount, &bucket.SuccessCount, &bucket.FailureCount,
+			&bucket.InputTokens, &bucket.OutputTokens, &bucket.ReasoningTokens, &bucket.CachedTokens, &bucket.TotalTokens); errScan != nil {
+			return nil, fmt.Errorf("scan sqlite usage bucket: %w", errScan)
+		}
+		bucket.Bucket = time.Unix(bucketUnix, 0).UTC()
+		out = append(out, bucket)
+	}
+	if errRows := rows.Err(); errRows != nil {
+		return nil, fmt.Errorf("iterate sqlite usage buckets: %w", errRows)
+	}
+	return out, nil
+}
+
+func (s *Store) breakdown(ctx context.Context, filter QueryFilter, column string) ([]BreakdownRow, error) {
+	if !allowedBreakdownColumn(column) {
+		return nil, fmt.Errorf("unsupported sqlite usage breakdown column %q", column)
+	}
+	where, args := buildWhere(filter)
+	rows, err := s.db.sqlDB.QueryContext(ctx, fmt.Sprintf(`SELECT
+		TRIM(%s) AS key,
+		COUNT(*) AS request_count,
+		COALESCE(SUM(CASE WHEN failed = 0 THEN 1 ELSE 0 END), 0) AS success_count,
+		COALESCE(SUM(CASE WHEN failed = 1 THEN 1 ELSE 0 END), 0) AS failure_count,
+		COALESCE(SUM(input_tokens), 0) AS input_tokens,
+		COALESCE(SUM(output_tokens), 0) AS output_tokens,
+		COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+		COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+		COALESCE(SUM(total_tokens), 0) AS total_tokens,
+		COALESCE(AVG(CASE WHEN latency_ms > 0 THEN latency_ms ELSE NULL END), 0) AS average_latency_ms
+		FROM usage_events %s GROUP BY TRIM(%s) HAVING key != '' ORDER BY request_count DESC, key ASC LIMIT 100`, column, where, column), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite usage breakdown: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := []BreakdownRow{}
+	for rows.Next() {
+		var row BreakdownRow
+		if errScan := rows.Scan(&row.Key, &row.RequestCount, &row.SuccessCount, &row.FailureCount,
+			&row.InputTokens, &row.OutputTokens, &row.ReasoningTokens, &row.CachedTokens,
+			&row.TotalTokens, &row.AverageLatencyMS); errScan != nil {
+			return nil, fmt.Errorf("scan sqlite usage breakdown: %w", errScan)
+		}
+		if row.RequestCount > 0 {
+			row.SuccessRate = float64(row.SuccessCount) / float64(row.RequestCount)
+		}
+		row.DisplayName = row.Key
+		out = append(out, row)
+	}
+	if errRows := rows.Err(); errRows != nil {
+		return nil, fmt.Errorf("iterate sqlite usage breakdown: %w", errRows)
+	}
+	return out, nil
+}
+
+func (s *Store) listDistinct(ctx context.Context, filter QueryFilter, column string) ([]string, error) {
+	if !allowedBreakdownColumn(column) {
+		return nil, fmt.Errorf("unsupported sqlite usage distinct column %q", column)
+	}
+	where, args := buildWhere(filter)
+	rows, err := s.db.sqlDB.QueryContext(ctx, fmt.Sprintf(`SELECT DISTINCT TRIM(%s) FROM usage_events %s
+		AND TRIM(%s) != '' ORDER BY TRIM(%s) ASC LIMIT 500`, column, where, column, column), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite usage filter options: %w", err)
+	}
+	defer closeRows(rows)
+	out := []string{}
+	for rows.Next() {
+		var value string
+		if errScan := rows.Scan(&value); errScan != nil {
+			return nil, fmt.Errorf("scan sqlite usage filter option: %w", errScan)
+		}
+		out = append(out, value)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) listSources(ctx context.Context, filter QueryFilter) ([]SourceOption, error) {
+	where, args := buildWhere(filter)
+	rows, err := s.db.sqlDB.QueryContext(ctx, `SELECT source, source_hash FROM usage_events `+where+`
+		AND source_hash != '' GROUP BY source_hash ORDER BY MAX(timestamp) DESC LIMIT 500`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite usage source options: %w", err)
+	}
+	defer closeRows(rows)
+	out := []SourceOption{}
+	for rows.Next() {
+		var source, hash string
+		if errScan := rows.Scan(&source, &hash); errScan != nil {
+			return nil, fmt.Errorf("scan sqlite usage source option: %w", errScan)
+		}
+		out = append(out, SourceOption{Display: maskSource(source), Hash: hash})
+	}
+	return out, rows.Err()
+}
+
+func buildWhere(filter QueryFilter) (string, []any) {
+	clauses := []string{"1 = 1"}
+	args := make([]any, 0, 8)
+	if filter.StartTime != nil {
+		clauses = append(clauses, "timestamp >= ?")
+		args = append(args, filter.StartTime.Unix())
+	}
+	if filter.EndTime != nil {
+		clauses = append(clauses, "timestamp <= ?")
+		args = append(args, filter.EndTime.Unix())
+	}
+	if filter.Model != "" {
+		clauses = append(clauses, "model = ?")
+		args = append(args, filter.Model)
+	}
+	if filter.Provider != "" {
+		clauses = append(clauses, "provider = ?")
+		args = append(args, filter.Provider)
+	}
+	if filter.SourceHash != "" {
+		clauses = append(clauses, "source_hash = ?")
+		args = append(args, filter.SourceHash)
+	}
+	if filter.AuthIndex != "" {
+		clauses = append(clauses, "auth_index = ?")
+		args = append(args, filter.AuthIndex)
+	}
+	if filter.AuthIDHash != "" {
+		clauses = append(clauses, "auth_id_hash = ?")
+		args = append(args, filter.AuthIDHash)
+	}
+	switch filter.Result {
+	case "success":
+		clauses = append(clauses, "failed = 0")
+	case "failed":
+		clauses = append(clauses, "failed = 1")
+	}
+	return "WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func eventView(event Event) EventView {
+	return EventView{
+		ID:              event.ID,
+		RequestID:       event.RequestID,
+		Timestamp:       event.Timestamp,
+		Provider:        event.Provider,
+		Model:           event.Model,
+		Endpoint:        event.Endpoint,
+		APIGroupKey:     event.APIGroupKey,
+		SourceDisplay:   maskSource(event.Source),
+		SourceHash:      event.SourceHash,
+		AuthIndex:       event.AuthIndex,
+		AuthIDHash:      event.AuthIDHash,
+		AuthType:        event.AuthType,
+		Failed:          event.Failed,
+		StatusCode:      event.StatusCode,
+		LatencyMS:       event.LatencyMS,
+		InputTokens:     event.InputTokens,
+		OutputTokens:    event.OutputTokens,
+		ReasoningTokens: event.ReasoningTokens,
+		CachedTokens:    event.CachedTokens,
+		TotalTokens:     event.TotalTokens,
+		CreatedAt:       event.CreatedAt,
+	}
+}
+
+func maskSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return ""
+	}
+	at := strings.IndexByte(source, '@')
+	if at > 0 {
+		local := source[:at]
+		if len(local) == 1 {
+			return local + "***" + source[at:]
+		}
+		return local[:1] + "***" + source[at:]
+	}
+	if len(source) <= 8 {
+		if len(source) <= 4 {
+			return "****"
+		}
+		return source[:1] + "..." + source[len(source)-1:]
+	}
+	return source[:4] + "..." + source[len(source)-4:]
+}
+
+func finalizeSummary(summary *Summary, filter QueryFilter) {
+	if summary == nil {
+		return
+	}
+	if summary.RequestCount > 0 {
+		summary.SuccessRate = float64(summary.SuccessCount) / float64(summary.RequestCount)
+	}
+	if filter.StartTime != nil && filter.EndTime != nil && filter.EndTime.After(*filter.StartTime) {
+		minutes := filter.EndTime.Sub(*filter.StartTime).Minutes()
+		if minutes > 0 {
+			summary.RPM = float64(summary.RequestCount) / minutes
+			summary.TPM = float64(summary.TotalTokens) / minutes
+		}
+	}
+}
+
+func allowedBreakdownColumn(column string) bool {
+	switch column {
+	case "model", "provider", "api_group_key", "source_hash", "auth_index", "auth_id_hash":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizePage(page int) int {
+	if page <= 0 {
+		return 1
+	}
+	return page
+}
+
+func normalizePageSize(pageSize int) int {
+	if pageSize <= 0 {
+		return 50
+	}
+	if pageSize > 500 {
+		return 500
+	}
+	return pageSize
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func closeRows(rows *sql.Rows) {
+	_ = rows.Close()
+}

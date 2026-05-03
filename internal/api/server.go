@@ -31,6 +31,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagesqlite"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers"
@@ -39,6 +40,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers/openai"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"gopkg.in/yaml.v3"
@@ -179,6 +181,11 @@ type Server struct {
 	// envManagementSecret indicates whether MANAGEMENT_PASSWORD is configured.
 	envManagementSecret bool
 
+	usageSQLiteDB     *usagesqlite.DB
+	usageSQLiteStore  *usagesqlite.Store
+	usageSQLitePlugin *usagesqlite.Plugin
+	usageSQLiteCancel context.CancelFunc
+
 	localPassword string
 
 	keepAliveEnabled   bool
@@ -272,8 +279,12 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	managementasset.SetCurrentConfig(cfg)
 	auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 	applySignatureCacheConfig(nil, cfg)
+	s.initUsageSQLite(cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
+	if s.usageSQLiteStore != nil {
+		s.mgmt.SetUsageStore(s.usageSQLiteStore)
+	}
 	if optionState.localPassword != "" {
 		s.mgmt.SetLocalPassword(optionState.localPassword)
 	}
@@ -530,6 +541,14 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/usage-statistics-enabled", s.mgmt.GetUsageStatisticsEnabled)
 		mgmt.PUT("/usage-statistics-enabled", s.mgmt.PutUsageStatisticsEnabled)
 		mgmt.PATCH("/usage-statistics-enabled", s.mgmt.PutUsageStatisticsEnabled)
+		mgmt.GET("/usage-sqlite-enabled", s.mgmt.GetUsageSQLiteEnabled)
+		mgmt.PUT("/usage-sqlite-enabled", s.mgmt.PutUsageSQLiteEnabled)
+		mgmt.PATCH("/usage-sqlite-enabled", s.mgmt.PutUsageSQLiteEnabled)
+		mgmt.GET("/usage/overview", s.mgmt.GetUsageOverview)
+		mgmt.GET("/usage/analysis", s.mgmt.GetUsageAnalysis)
+		mgmt.GET("/usage/events", s.mgmt.ListUsageEvents)
+		mgmt.GET("/usage/credentials", s.mgmt.ListUsageCredentials)
+		mgmt.GET("/usage/filter-options", s.mgmt.GetUsageFilterOptions)
 
 		mgmt.GET("/proxy-url", s.mgmt.GetProxyURL)
 		mgmt.PUT("/proxy-url", s.mgmt.PutProxyURL)
@@ -930,9 +949,65 @@ func (s *Server) Stop(ctx context.Context) error {
 	if err := s.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", err)
 	}
+	if s.usageSQLiteCancel != nil {
+		s.usageSQLiteCancel()
+	}
+	if s.usageSQLitePlugin != nil {
+		if err := s.usageSQLitePlugin.Stop(ctx); err != nil {
+			return fmt.Errorf("failed to stop sqlite usage plugin: %w", err)
+		}
+	}
+	if s.usageSQLiteDB != nil {
+		if err := s.usageSQLiteDB.Close(); err != nil {
+			return fmt.Errorf("failed to close sqlite usage database: %w", err)
+		}
+	}
 
 	log.Debug("API server stopped")
 	return nil
+}
+
+func (s *Server) initUsageSQLite(cfg *config.Config) {
+	if s == nil || cfg == nil || !cfg.UsageSQLiteEnabled {
+		return
+	}
+	ctx := context.Background()
+	dbPath := cfg.UsageSQLitePath
+	if strings.TrimSpace(dbPath) != "" && !filepath.IsAbs(dbPath) && !strings.HasPrefix(strings.TrimSpace(dbPath), "~") {
+		base := filepath.Dir(strings.TrimSpace(s.configFilePath))
+		if base != "" && base != "." {
+			dbPath = filepath.Join(base, dbPath)
+		}
+	}
+	db, err := usagesqlite.OpenSQLite(ctx, dbPath)
+	if err != nil {
+		log.WithError(err).Warn("sqlite usage store disabled: failed to open database")
+		return
+	}
+	store := usagesqlite.NewStore(db)
+	salt, err := usagesqlite.ResolveSalt(cfg, s.configFilePath)
+	if err != nil {
+		log.WithError(err).Warn("sqlite usage store disabled: failed to resolve usage salt")
+		if errClose := db.Close(); errClose != nil {
+			log.WithError(errClose).Debug("failed to close sqlite usage database after salt error")
+		}
+		return
+	}
+	plugin := usagesqlite.NewPlugin(store, salt, usagesqlite.PluginOptions{
+		Enabled:       cfg.UsageStatisticsEnabled && cfg.UsageSQLiteEnabled,
+		BufferSize:    cfg.UsageSQLiteBufferSize,
+		BatchSize:     cfg.UsageSQLiteBatchSize,
+		FlushInterval: cfg.UsageSQLiteFlushInterval,
+	})
+	usageCtx, cancel := context.WithCancel(context.Background())
+	plugin.Start(usageCtx)
+	usage.RegisterPlugin(plugin)
+	usagesqlite.StartRetentionCleaner(usageCtx, store, cfg.UsageRetentionDays, 24*time.Hour)
+
+	s.usageSQLiteDB = db
+	s.usageSQLiteStore = store
+	s.usageSQLitePlugin = plugin
+	s.usageSQLiteCancel = cancel
 }
 
 // corsMiddleware returns a Gin middleware handler that adds CORS headers
@@ -998,6 +1073,17 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 
 	if oldCfg == nil || oldCfg.UsageStatisticsEnabled != cfg.UsageStatisticsEnabled {
 		redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	}
+	if cfg.UsageSQLiteEnabled && s.usageSQLitePlugin == nil {
+		s.initUsageSQLite(cfg)
+		if s.mgmt != nil && s.usageSQLiteStore != nil {
+			s.mgmt.SetUsageStore(s.usageSQLiteStore)
+		}
+	}
+	if s.usageSQLitePlugin != nil && (oldCfg == nil ||
+		oldCfg.UsageStatisticsEnabled != cfg.UsageStatisticsEnabled ||
+		oldCfg.UsageSQLiteEnabled != cfg.UsageSQLiteEnabled) {
+		s.usageSQLitePlugin.SetEnabled(cfg.UsageStatisticsEnabled && cfg.UsageSQLiteEnabled)
 	}
 
 	if oldCfg == nil || oldCfg.RedisUsageQueueRetentionSeconds != cfg.RedisUsageQueueRetentionSeconds {
@@ -1077,6 +1163,9 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 	if s.mgmt != nil {
 		s.mgmt.SetConfig(cfg)
 		s.mgmt.SetAuthManager(s.handlers.AuthManager)
+		if s.usageSQLiteStore != nil {
+			s.mgmt.SetUsageStore(s.usageSQLiteStore)
+		}
 	}
 
 	// Notify Amp module only when Amp config has changed.

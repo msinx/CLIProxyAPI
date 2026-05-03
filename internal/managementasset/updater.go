@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	defaultManagementReleaseURL  = "https://api.github.com/repos/router-for-me/Cli-Proxy-API-Management-Center/releases/latest"
-	defaultManagementFallbackURL = "https://cpamc.router-for.me/"
+	defaultManagementReleaseURL  = "https://api.github.com/repos/msinx/Cli-Proxy-API-Management-Center/releases/latest"
+	defaultManagementFallbackURL = ""
 	managementAssetName          = "management.html"
 	httpUserAgent                = "CLIProxyAPI-management-updater"
 	managementSyncMinInterval    = 30 * time.Second
@@ -235,7 +235,7 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 		asset, remoteHash, err := fetchLatestAsset(ctx, client, releaseURL)
 		if err != nil {
 			if localFileMissing {
-				log.WithError(err).Warn("failed to fetch latest management release information, trying fallback page")
+				log.WithError(err).Warn("failed to fetch latest management release information")
 				if ensureFallbackManagementHTML(ctx, client, localPath) {
 					return nil, nil
 				}
@@ -253,7 +253,7 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 		data, downloadedHash, err := downloadAsset(ctx, client, asset.BrowserDownloadURL)
 		if err != nil {
 			if localFileMissing {
-				log.WithError(err).Warn("failed to download management asset, trying fallback page")
+				log.WithError(err).Warn("failed to download management asset")
 				if ensureFallbackManagementHTML(ctx, client, localPath) {
 					return nil, nil
 				}
@@ -282,6 +282,10 @@ func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL 
 }
 
 func ensureFallbackManagementHTML(ctx context.Context, client *http.Client, localPath string) bool {
+	if strings.TrimSpace(defaultManagementFallbackURL) == "" {
+		log.Warn("management asset fallback URL disabled")
+		return false
+	}
 	data, downloadedHash, err := downloadAsset(ctx, client, defaultManagementFallbackURL)
 	if err != nil {
 		log.WithError(err).Warn("failed to download fallback management control panel page")

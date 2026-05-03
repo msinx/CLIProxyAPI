@@ -39,6 +39,24 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.UsageStatisticsEnabled != newCfg.UsageStatisticsEnabled {
 		changes = append(changes, fmt.Sprintf("usage-statistics-enabled: %t -> %t", oldCfg.UsageStatisticsEnabled, newCfg.UsageStatisticsEnabled))
 	}
+	if oldCfg.UsageSQLiteEnabled != newCfg.UsageSQLiteEnabled {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-enabled: %t -> %t", oldCfg.UsageSQLiteEnabled, newCfg.UsageSQLiteEnabled))
+	}
+	if oldCfg.UsageSQLitePath != newCfg.UsageSQLitePath {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-path: %s -> %s", oldCfg.UsageSQLitePath, newCfg.UsageSQLitePath))
+	}
+	if oldCfg.UsageRetentionDays != newCfg.UsageRetentionDays {
+		changes = append(changes, fmt.Sprintf("usage-retention-days: %d -> %d", oldCfg.UsageRetentionDays, newCfg.UsageRetentionDays))
+	}
+	if oldCfg.UsageSQLiteBufferSize != newCfg.UsageSQLiteBufferSize {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-buffer-size: %d -> %d", oldCfg.UsageSQLiteBufferSize, newCfg.UsageSQLiteBufferSize))
+	}
+	if oldCfg.UsageSQLiteBatchSize != newCfg.UsageSQLiteBatchSize {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-batch-size: %d -> %d", oldCfg.UsageSQLiteBatchSize, newCfg.UsageSQLiteBatchSize))
+	}
+	if oldCfg.UsageSQLiteFlushInterval != newCfg.UsageSQLiteFlushInterval {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-flush-interval: %s -> %s", oldCfg.UsageSQLiteFlushInterval, newCfg.UsageSQLiteFlushInterval))
+	}
 	if oldCfg.RedisUsageQueueRetentionSeconds != newCfg.RedisUsageQueueRetentionSeconds {
 		changes = append(changes, fmt.Sprintf("redis-usage-queue-retention-seconds: %d -> %d", oldCfg.RedisUsageQueueRetentionSeconds, newCfg.RedisUsageQueueRetentionSeconds))
 	}
