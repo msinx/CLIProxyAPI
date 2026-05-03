@@ -1023,7 +1023,7 @@ func resolveUsagePathFromConfig(pathValue, configFilePath string) string {
 }
 
 func usageModelPricesFromConfig(cfg *config.Config) map[string]usagesqlite.ModelPrice {
-	if cfg == nil || len(cfg.UsageModelPrices) == 0 {
+	if cfg == nil {
 		return nil
 	}
 	prices := make(map[string]usagesqlite.ModelPrice, len(cfg.UsageModelPrices))

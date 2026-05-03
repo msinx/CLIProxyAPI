@@ -350,18 +350,48 @@ func TestStoreCostAnalyticsUsesConfiguredModelPrices(t *testing.T) {
 	}
 }
 
+func TestStoreCostAnalyticsUsesDefaultModelPrices(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newTestStore(t, ctx)
+	ts := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	if err := store.InsertEvent(ctx, Event{
+		EventKey:     "default-priced",
+		RequestID:    "default-priced",
+		Timestamp:    ts,
+		Model:        "team/gpt-5.4-mini-2026-03-17(high)",
+		InputTokens:  1_000_000,
+		OutputTokens: 1_000_000,
+		CachedTokens: 1_000_000,
+		TotalTokens:  3_000_000,
+		CreatedAt:    ts,
+	}); err != nil {
+		t.Fatalf("InsertEvent() error = %v", err)
+	}
+
+	overview, err := store.GetOverview(ctx, QueryFilter{})
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	if !overview.Summary.CostAvailable {
+		t.Fatalf("Summary.CostAvailable = false, want true for built-in default price")
+	}
+	if !floatEquals(overview.Summary.TotalCost, 5.325) {
+		t.Fatalf("Summary.TotalCost = %v, want default gpt-5.4-mini price 5.325", overview.Summary.TotalCost)
+	}
+}
+
 func TestStoreCostAnalyticsReportsPartialPricing(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	store := newTestStore(t, ctx)
-	store.SetModelPrices(map[string]ModelPrice{
-		"priced": {PromptPricePer1M: 1},
-	})
+	store.SetModelPrices(map[string]ModelPrice{"priced": {PromptPricePer1M: 1}})
 	ts := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
 	for _, event := range []Event{
 		{EventKey: "priced", RequestID: "priced", Timestamp: ts, Provider: "openai", Model: "priced", InputTokens: 1_000_000, TotalTokens: 1_000_000, CreatedAt: ts},
-		{EventKey: "unpriced", RequestID: "unpriced", Timestamp: ts, Provider: "openai", Model: "unpriced", InputTokens: 1_000_000, TotalTokens: 1_000_000, CreatedAt: ts},
+		{EventKey: "unpriced", RequestID: "unpriced", Timestamp: ts, Provider: "openai", Model: "unknown-local-model", InputTokens: 1_000_000, TotalTokens: 1_000_000, CreatedAt: ts},
 	} {
 		if err := store.InsertEvent(ctx, event); err != nil {
 			t.Fatalf("InsertEvent(%s) error = %v", event.EventKey, err)

@@ -100,7 +100,9 @@ usage-sqlite-backup-path: ./data/usage-backups
 # SQLite usage backup retention in days. Set to 0 to keep only current-day backups.
 usage-sqlite-backup-retention-days: 7
 
-# Optional per-model usage prices for estimated dashboard costs.
+# Optional overrides for built-in per-model usage prices.
+# The dashboard already includes standard OpenAI, Claude, and Gemini paid-tier defaults.
+# Add entries here only for custom models, aliases, or provider-specific contract prices.
 # Prices are charged per 1M tokens. Reasoning tokens are tracked separately and are not charged here.
 # usage-model-prices:
 #   gpt-5.4:
