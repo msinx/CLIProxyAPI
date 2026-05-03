@@ -72,6 +72,12 @@
 - `usage-sqlite-buffer-size`
 - `usage-sqlite-batch-size`
 - `usage-sqlite-flush-interval`
+- `usage-sqlite-maintenance-interval`：默认 `24h`，用于 retention cleanup、WAL checkpoint、vacuum 和可选 backup。
+- `usage-sqlite-backup-enabled`：默认 `false`，开启后 maintenance 会生成 SQLite 备份。
+- `usage-sqlite-backup-path`：默认 `./data/usage-backups`。
+- `usage-sqlite-backup-retention-days`：默认 `7`。
+
+参考 `Willxup/cpa-usage-keeper` 后，本 fork 仍保持进程内 SQLite 方案，不引入独立 usage 服务、Redis inbox、登录态或 Docker 部署面。已吸收的可靠性改动是：SQLite plugin flush 使用事务批量写入；maintenance 会定期执行 retention cleanup、WAL checkpoint、删除数据后的 vacuum；可选开启 SQLite `VACUUM INTO` 备份和备份保留清理。后续如果要继续补齐独立项目能力，优先顺序建议是 credential/source 显示解析、价格/成本分析、服务健康时间线，而不是把独立服务整体搬进后端。
 
 管理面板资产源配置：
 
@@ -303,8 +309,10 @@ git remote show upstream
 
 - `internal/usagesqlite/` 是否仍能编译并通过测试。
 - management usage endpoints 是否仍挂在 `/v0/management` 下。
-- `usage-sqlite-enabled` 等配置是否仍出现在默认配置、example config、management config basic 和 config diff 中。
+- `usage-sqlite-enabled`、`usage-sqlite-backup-*`、`usage-sqlite-maintenance-interval` 等配置是否仍出现在默认配置、example config 和 config diff 中；`usage-sqlite-enabled` 仍需要保留 management config basic 开关。
 - request/usage 事件链路是否仍会调用 SQLite plugin。
+- plugin flush 是否仍使用 `InsertEvents` 事务批量写入，不要退回逐条写入。
+- maintenance worker 是否仍按配置执行 retention、checkpoint、vacuum 和可选 backup。
 - `internal/managementasset/updater.go` 是否仍默认指向 `msinx/Cli-Proxy-API-Management-Center`。
 - fallback management asset URL 是否仍保持禁用，避免回退到官方前端。
 

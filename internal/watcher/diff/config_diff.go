@@ -57,6 +57,18 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.UsageSQLiteFlushInterval != newCfg.UsageSQLiteFlushInterval {
 		changes = append(changes, fmt.Sprintf("usage-sqlite-flush-interval: %s -> %s", oldCfg.UsageSQLiteFlushInterval, newCfg.UsageSQLiteFlushInterval))
 	}
+	if oldCfg.UsageSQLiteMaintenanceInterval != newCfg.UsageSQLiteMaintenanceInterval {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-maintenance-interval: %s -> %s", oldCfg.UsageSQLiteMaintenanceInterval, newCfg.UsageSQLiteMaintenanceInterval))
+	}
+	if oldCfg.UsageSQLiteBackupEnabled != newCfg.UsageSQLiteBackupEnabled {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-backup-enabled: %t -> %t", oldCfg.UsageSQLiteBackupEnabled, newCfg.UsageSQLiteBackupEnabled))
+	}
+	if oldCfg.UsageSQLiteBackupPath != newCfg.UsageSQLiteBackupPath {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-backup-path: %s -> %s", oldCfg.UsageSQLiteBackupPath, newCfg.UsageSQLiteBackupPath))
+	}
+	if oldCfg.UsageSQLiteBackupRetentionDays != newCfg.UsageSQLiteBackupRetentionDays {
+		changes = append(changes, fmt.Sprintf("usage-sqlite-backup-retention-days: %d -> %d", oldCfg.UsageSQLiteBackupRetentionDays, newCfg.UsageSQLiteBackupRetentionDays))
+	}
 	if oldCfg.RedisUsageQueueRetentionSeconds != newCfg.RedisUsageQueueRetentionSeconds {
 		changes = append(changes, fmt.Sprintf("redis-usage-queue-retention-seconds: %d -> %d", oldCfg.RedisUsageQueueRetentionSeconds, newCfg.RedisUsageQueueRetentionSeconds))
 	}

@@ -63,3 +63,18 @@ func TestNewServerResolvesRelativeSQLiteUsagePathFromConfigDirectory(t *testing.
 		t.Fatalf("expected sqlite database at %s: %v", wantPath, err)
 	}
 }
+
+func TestResolveUsagePathFromConfigKeepsHomeAndAbsolutePaths(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join("/tmp", "cliproxy", "config.yaml")
+	if got := resolveUsagePathFromConfig("data/usage.db", configPath); got != filepath.Join("/tmp", "cliproxy", "data", "usage.db") {
+		t.Fatalf("relative path resolved to %q", got)
+	}
+	if got := resolveUsagePathFromConfig("/var/lib/usage.db", configPath); got != "/var/lib/usage.db" {
+		t.Fatalf("absolute path resolved to %q", got)
+	}
+	if got := resolveUsagePathFromConfig("~/usage.db", configPath); got != "~/usage.db" {
+		t.Fatalf("home path resolved to %q", got)
+	}
+}

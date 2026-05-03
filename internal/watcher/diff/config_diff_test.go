@@ -2,6 +2,7 @@ package diff
 
 import (
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
@@ -106,6 +107,27 @@ func TestBuildConfigChangeDetails_NoChanges(t *testing.T) {
 	if details := BuildConfigChangeDetails(cfg, cfg); len(details) != 0 {
 		t.Fatalf("expected no change entries, got %v", details)
 	}
+}
+
+func TestBuildConfigChangeDetails_UsageSQLiteMaintenance(t *testing.T) {
+	oldCfg := &config.Config{
+		UsageSQLiteMaintenanceInterval: 24 * time.Hour,
+		UsageSQLiteBackupEnabled:       false,
+		UsageSQLiteBackupPath:          "./old-backups",
+		UsageSQLiteBackupRetentionDays: 7,
+	}
+	newCfg := &config.Config{
+		UsageSQLiteMaintenanceInterval: 48 * time.Hour,
+		UsageSQLiteBackupEnabled:       true,
+		UsageSQLiteBackupPath:          "./new-backups",
+		UsageSQLiteBackupRetentionDays: 14,
+	}
+
+	changes := BuildConfigChangeDetails(oldCfg, newCfg)
+	expectContains(t, changes, "usage-sqlite-maintenance-interval: 24h0m0s -> 48h0m0s")
+	expectContains(t, changes, "usage-sqlite-backup-enabled: false -> true")
+	expectContains(t, changes, "usage-sqlite-backup-path: ./old-backups -> ./new-backups")
+	expectContains(t, changes, "usage-sqlite-backup-retention-days: 7 -> 14")
 }
 
 func TestBuildConfigChangeDetails_GeminiVertexHeadersAndForceMappings(t *testing.T) {
