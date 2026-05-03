@@ -36,7 +36,7 @@ const insertUsageEventSQL = `INSERT OR IGNORE INTO usage_events (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 func NewStore(db *DB) *Store {
-	return &Store{db: db}
+	return &Store{db: db, prices: defaultModelPricesSnapshot()}
 }
 
 func (s *Store) SetModelPrices(prices map[string]ModelPrice) {
@@ -46,7 +46,7 @@ func (s *Store) SetModelPrices(prices map[string]ModelPrice) {
 	normalized := normalizeModelPrices(prices)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.prices = normalized
+	s.prices = mergeModelPrices(normalized)
 }
 
 func (s *Store) InsertEvent(ctx context.Context, event Event) error {
@@ -571,7 +571,7 @@ func normalizeModelPrices(prices map[string]ModelPrice) map[string]ModelPrice {
 	}
 	normalized := make(map[string]ModelPrice, len(prices))
 	for model, price := range prices {
-		model = strings.TrimSpace(model)
+		model = normalizeModelPriceKey(model)
 		if model == "" {
 			continue
 		}
@@ -623,7 +623,7 @@ func (s *Store) eventCost(event Event) (float64, bool) {
 }
 
 func eventCostWithPrices(event Event, prices map[string]ModelPrice) (float64, bool) {
-	price, ok := prices[strings.TrimSpace(event.Model)]
+	price, ok := findModelPrice(prices, event.Model)
 	if !ok {
 		return 0, false
 	}
