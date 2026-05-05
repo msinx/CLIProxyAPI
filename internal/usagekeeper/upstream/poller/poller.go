@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -15,4 +16,8 @@ type Status struct {
 	LastWarning string
 	LastStatus  string
 	SyncRunning bool
+}
+
+func shouldLogSyncError(err error) bool {
+	return err != nil && !errors.Is(err, ErrSyncCompletedWithWarnings) && !errors.Is(err, ErrSyncAlreadyRunning) && !errors.Is(err, context.Canceled)
 }

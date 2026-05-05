@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	"gorm.io/gorm"
@@ -18,22 +20,27 @@ type RuntimeMetadataSource struct {
 	AuthManager *coreauth.Manager
 }
 
-func (s RuntimeMetadataSource) RefreshUsageKeeperMetadata(_ context.Context, db *gorm.DB) error {
+func (s RuntimeMetadataSource) RefreshUsageKeeperMetadata(ctx context.Context, db *gorm.DB) error {
 	if db == nil {
 		return nil
 	}
-	if err := repository.ReplaceAuthFiles(db, s.authFileInputs()); err != nil {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := time.Now().UTC()
+	if err := repository.ReplaceUsageIdentitiesForAuthType(ctx, db, s.authUsageIdentities(), models.UsageIdentityAuthTypeAuthFile, now); err != nil {
 		return err
 	}
-	return repository.ReplaceProviderMetadata(db, s.providerMetadataInputs())
+	identities, providerTypes := s.providerUsageIdentities()
+	return repository.ReplaceUsageIdentitiesForProviderTypes(ctx, db, identities, providerTypes, now)
 }
 
-func (s RuntimeMetadataSource) authFileInputs() []repository.AuthFileInput {
+func (s RuntimeMetadataSource) authUsageIdentities() []models.UsageIdentity {
 	if s.AuthManager == nil {
 		return nil
 	}
 	auths := s.AuthManager.List()
-	inputs := make([]repository.AuthFileInput, 0, len(auths))
+	identities := make([]models.UsageIdentity, 0, len(auths))
 	for _, auth := range auths {
 		if auth == nil {
 			continue
@@ -43,42 +50,37 @@ func (s RuntimeMetadataSource) authFileInputs() []repository.AuthFileInput {
 			authIndex = auth.ID
 		}
 		accountType, account := auth.AccountInfo()
-		inputs = append(inputs, repository.AuthFileInput{
-			AuthIndex:   authIndex,
-			Name:        firstRuntimeString(auth.Label, auth.FileName, auth.ID),
-			Email:       emailFromAuthAccount(accountType, account),
-			Type:        firstRuntimeString(accountType, auth.Provider),
-			Provider:    strings.TrimSpace(auth.Provider),
-			Label:       strings.TrimSpace(auth.Label),
-			Status:      string(auth.Status),
-			Source:      "memory",
-			Disabled:    auth.Disabled,
-			Unavailable: auth.Unavailable,
-			RuntimeOnly: auth.FileName == "",
+		identities = append(identities, models.UsageIdentity{
+			Name:         firstRuntimeString(emailFromAuthAccount(accountType, account), auth.Label, auth.FileName, auth.ID, authIndex),
+			AuthType:     models.UsageIdentityAuthTypeAuthFile,
+			AuthTypeName: "oauth",
+			Identity:     authIndex,
+			Type:         firstRuntimeString(accountType, auth.Provider),
+			Provider:     strings.TrimSpace(auth.Provider),
 		})
 	}
-	return inputs
+	return identities
 }
 
-func (s RuntimeMetadataSource) providerMetadataInputs() []repository.ProviderMetadataInput {
-	inputs := s.providerMetadataInputsFromAuthManager()
+func (s RuntimeMetadataSource) providerUsageIdentities() ([]models.UsageIdentity, []string) {
+	inputs := s.providerUsageIdentitiesFromAuthManager()
 	if len(inputs) > 0 {
-		return inputs
+		return inputs, providerTypesFromIdentities(inputs)
 	}
 	if s.Config == nil {
-		return nil
+		return nil, nil
 	}
-	inputs = make([]repository.ProviderMetadataInput, 0)
-	inputs = appendProviderKeyMetadata(inputs, "gemini", s.Config.GeminiKey, func(item config.GeminiKey) (string, string, string) {
+	inputs = make([]models.UsageIdentity, 0)
+	inputs = appendProviderKeyIdentity(inputs, "gemini", s.Config.GeminiKey, func(item config.GeminiKey) (string, string, string) {
 		return item.APIKey, item.Prefix, item.BaseURL
 	})
-	inputs = appendProviderKeyMetadata(inputs, "claude", s.Config.ClaudeKey, func(item config.ClaudeKey) (string, string, string) {
+	inputs = appendProviderKeyIdentity(inputs, "claude", s.Config.ClaudeKey, func(item config.ClaudeKey) (string, string, string) {
 		return item.APIKey, item.Prefix, item.BaseURL
 	})
-	inputs = appendProviderKeyMetadata(inputs, "codex", s.Config.CodexKey, func(item config.CodexKey) (string, string, string) {
+	inputs = appendProviderKeyIdentity(inputs, "codex", s.Config.CodexKey, func(item config.CodexKey) (string, string, string) {
 		return item.APIKey, item.Prefix, item.BaseURL
 	})
-	inputs = appendProviderKeyMetadata(inputs, "vertex", s.Config.VertexCompatAPIKey, func(item config.VertexCompatKey) (string, string, string) {
+	inputs = appendProviderKeyIdentity(inputs, "vertex", s.Config.VertexCompatAPIKey, func(item config.VertexCompatKey) (string, string, string) {
 		return item.APIKey, item.Prefix, item.BaseURL
 	})
 	for _, compat := range s.Config.OpenAICompatibility {
@@ -91,25 +93,26 @@ func (s RuntimeMetadataSource) providerMetadataInputs() []repository.ProviderMet
 			if key == "" {
 				continue
 			}
-			lookupKey := stableProviderLookupKey("openai-compatible", displayName, key)
-			inputs = append(inputs, repository.ProviderMetadataInput{
-				LookupKey:    lookupKey,
-				ProviderType: "openai-compatible",
-				DisplayName:  displayName,
-				ProviderKey:  lookupKey,
-				MatchKind:    "api_key_hash",
+			lookupKey := stableProviderLookupKey("openai-compatible", "", key)
+			inputs = append(inputs, models.UsageIdentity{
+				Name:         displayName,
+				AuthType:     models.UsageIdentityAuthTypeAIProvider,
+				AuthTypeName: "apikey",
+				Identity:     lookupKey,
+				Type:         "openai-compatible",
+				Provider:     displayName,
 			})
 		}
 	}
-	return inputs
+	return inputs, providerTypesFromIdentities(inputs)
 }
 
-func (s RuntimeMetadataSource) providerMetadataInputsFromAuthManager() []repository.ProviderMetadataInput {
+func (s RuntimeMetadataSource) providerUsageIdentitiesFromAuthManager() []models.UsageIdentity {
 	if s.AuthManager == nil {
 		return nil
 	}
 	auths := s.AuthManager.List()
-	inputs := make([]repository.ProviderMetadataInput, 0, len(auths))
+	inputs := make([]models.UsageIdentity, 0, len(auths))
 	for _, auth := range auths {
 		if auth == nil || auth.Attributes == nil {
 			continue
@@ -118,24 +121,25 @@ func (s RuntimeMetadataSource) providerMetadataInputsFromAuthManager() []reposit
 		if rawKey == "" {
 			continue
 		}
-		lookupKey := firstRuntimeString(auth.Attributes["source"], stableProviderLookupKey(auth.Provider, firstRuntimeString(auth.Label, auth.Prefix), rawKey))
+		lookupKey := firstRuntimeString(auth.Attributes["source"], stableProviderLookupKey(auth.Provider, "", rawKey))
 		displayName := firstRuntimeString(auth.Label, auth.Prefix, auth.Attributes["compat_name"], auth.Attributes["base_url"], auth.Provider)
 		providerType := firstRuntimeString(auth.Attributes["provider_key"], auth.Provider)
 		if lookupKey == "" || providerType == "" {
 			continue
 		}
-		inputs = append(inputs, repository.ProviderMetadataInput{
-			LookupKey:    lookupKey,
-			ProviderType: providerType,
-			DisplayName:  displayName,
-			ProviderKey:  stableProviderKey(providerType, displayName, lookupKey),
-			MatchKind:    "auth_source",
+		inputs = append(inputs, models.UsageIdentity{
+			Name:         displayName,
+			AuthType:     models.UsageIdentityAuthTypeAIProvider,
+			AuthTypeName: "apikey",
+			Identity:     lookupKey,
+			Type:         providerType,
+			Provider:     displayName,
 		})
 	}
 	return inputs
 }
 
-func appendProviderKeyMetadata[T any](inputs []repository.ProviderMetadataInput, provider string, values []T, metadata func(T) (string, string, string)) []repository.ProviderMetadataInput {
+func appendProviderKeyIdentity[T any](inputs []models.UsageIdentity, provider string, values []T, metadata func(T) (string, string, string)) []models.UsageIdentity {
 	for _, value := range values {
 		key, prefix, baseURL := metadata(value)
 		key = strings.TrimSpace(key)
@@ -143,16 +147,27 @@ func appendProviderKeyMetadata[T any](inputs []repository.ProviderMetadataInput,
 			continue
 		}
 		displayName := firstRuntimeString(prefix, baseURL, provider)
-		lookupKey := stableProviderLookupKey(provider, displayName, key)
-		inputs = append(inputs, repository.ProviderMetadataInput{
-			LookupKey:    lookupKey,
-			ProviderType: provider,
-			DisplayName:  displayName,
-			ProviderKey:  lookupKey,
-			MatchKind:    "api_key_hash",
+		lookupKey := stableProviderLookupKey(provider, "", key)
+		inputs = append(inputs, models.UsageIdentity{
+			Name:         displayName,
+			AuthType:     models.UsageIdentityAuthTypeAIProvider,
+			AuthTypeName: "apikey",
+			Identity:     lookupKey,
+			Type:         provider,
+			Provider:     displayName,
 		})
 	}
 	return inputs
+}
+
+func providerTypesFromIdentities(identities []models.UsageIdentity) []string {
+	types := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		if strings.TrimSpace(identity.Type) != "" {
+			types = append(types, identity.Type)
+		}
+	}
+	return types
 }
 
 func stableProviderLookupKey(provider, displayName, rawKey string) string {
