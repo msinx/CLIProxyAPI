@@ -7,27 +7,36 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/auth"
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/auth"
 )
 
 const sessionCookieName = "cpa_usage_keeper_session"
 
 const maxFailedLoginAttempts = 5
 
+const failedLoginWindow = 15 * time.Minute
+
 type AuthConfig struct {
 	Enabled       bool
 	LoginPassword string
 	SessionTTL    time.Duration
 	BasePath      string
+	Verifier      func(clientIP string, localClient bool, provided string) (bool, int, string)
 }
 
 type authHandler struct {
 	config   AuthConfig
 	sessions *auth.SessionManager
+	now      func() time.Time
 
 	mu             sync.Mutex
-	failedAttempts map[string]int
+	failedAttempts map[string]failedLoginAttempt
+}
+
+type failedLoginAttempt struct {
+	count     int
+	updatedAt time.Time
 }
 
 type loginRequest struct {
@@ -39,7 +48,7 @@ type sessionResponse struct {
 }
 
 func NewAuthHandler(config AuthConfig, sessions *auth.SessionManager) *authHandler {
-	return &authHandler{config: config, sessions: sessions, failedAttempts: make(map[string]int)}
+	return &authHandler{config: config, sessions: sessions, now: time.Now, failedAttempts: make(map[string]failedLoginAttempt)}
 }
 
 func (h *authHandler) registerRoutes(router gin.IRoutes) {
@@ -105,15 +114,15 @@ func (h *authHandler) login(c *gin.Context) {
 	}
 
 	clientKey := loginClientKey(c)
-	passwordMatches := subtle.ConstantTimeCompare([]byte(request.Password), []byte(h.config.LoginPassword)) == 1
-	if h.tooManyFailedAttempts(clientKey) && !passwordMatches {
+	verification := h.verifyPassword(c, request.Password)
+	if h.tooManyFailedAttempts(clientKey) && !verification.matched {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many failed login attempts"})
 		return
 	}
 
-	if !passwordMatches {
+	if !verification.matched {
 		h.recordFailedAttempt(clientKey)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid password"})
+		c.JSON(verification.statusCode, gin.H{"error": verification.message})
 		return
 	}
 	h.clearFailedAttempts(clientKey)
@@ -142,6 +151,41 @@ func (h *authHandler) login(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+type passwordVerification struct {
+	matched    bool
+	statusCode int
+	message    string
+}
+
+func (h *authHandler) verifyPassword(c *gin.Context, provided string) passwordVerification {
+	if h == nil {
+		return passwordVerification{statusCode: http.StatusUnauthorized, message: "invalid password"}
+	}
+	if h.config.Verifier == nil {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(h.config.LoginPassword)) == 1 {
+			return passwordVerification{matched: true}
+		}
+		return passwordVerification{statusCode: http.StatusUnauthorized, message: "invalid password"}
+	}
+	clientIP := loginClientKey(c)
+	allowed, statusCode, message := h.config.Verifier(clientIP, isLoopbackHost(clientIP), provided)
+	if allowed {
+		return passwordVerification{matched: true}
+	}
+	if statusCode == 0 {
+		statusCode = http.StatusUnauthorized
+	}
+	if message == "" {
+		message = "invalid management key"
+	}
+	return passwordVerification{statusCode: statusCode, message: message}
+}
+
+func isLoopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func (h *authHandler) logout(c *gin.Context) {
 	if h == nil || !h.config.Enabled {
 		c.Status(http.StatusNoContent)
@@ -159,19 +203,34 @@ func (h *authHandler) logout(c *gin.Context) {
 func (h *authHandler) tooManyFailedAttempts(key string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.failedAttempts[key] >= maxFailedLoginAttempts
+	h.cleanupFailedAttemptLocked(key)
+	return h.failedAttempts[key].count >= maxFailedLoginAttempts
 }
 
 func (h *authHandler) recordFailedAttempt(key string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.failedAttempts[key]++
+	h.cleanupFailedAttemptLocked(key)
+	attempt := h.failedAttempts[key]
+	attempt.count++
+	attempt.updatedAt = h.now()
+	h.failedAttempts[key] = attempt
 }
 
 func (h *authHandler) clearFailedAttempts(key string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.failedAttempts, key)
+}
+
+func (h *authHandler) cleanupFailedAttemptLocked(key string) {
+	attempt, ok := h.failedAttempts[key]
+	if !ok {
+		return
+	}
+	if h.now().Sub(attempt.updatedAt) > failedLoginWindow {
+		delete(h.failedAttempts, key)
+	}
 }
 
 func loginClientKey(c *gin.Context) string {

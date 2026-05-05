@@ -1,3 +1,15 @@
+FROM node:22-alpine AS usage-assets
+
+WORKDIR /app
+
+COPY web/usage-keeper/package.json web/usage-keeper/package-lock.json ./web/usage-keeper/
+
+RUN npm --prefix ./web/usage-keeper ci
+
+COPY web/usage-keeper ./web/usage-keeper
+
+RUN npm --prefix ./web/usage-keeper run build
+
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
@@ -7,6 +19,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+RUN rm -rf internal/usagekeeper/assets/dist
+COPY --from=usage-assets /app/web/usage-keeper/dist ./internal/usagekeeper/assets/dist
 
 ARG VERSION=dev
 ARG COMMIT=none

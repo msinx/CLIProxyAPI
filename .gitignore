@@ -12,6 +12,8 @@ logs/*
 conv/*
 temp/*
 refs/*
+node_modules/
+web/usage-keeper/dist/
 
 # Storage backends
 pgstore/*
@@ -27,6 +29,7 @@ auths/*
 
 # Documentation
 docs/*
+!docs/usage-keeper.md
 AGENTS.md
 CLAUDE.md
 GEMINI.md
