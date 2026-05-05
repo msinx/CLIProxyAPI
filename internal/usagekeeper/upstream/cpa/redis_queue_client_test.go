@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +33,62 @@ func TestRedisQueueClientPopsBatch(t *testing.T) {
 	}
 
 	if len(messages) != 2 || messages[0] != `{"a":1}` || messages[1] != `{"b":2}` {
+		t.Fatalf("unexpected messages: %#v", messages)
+	}
+}
+
+func TestRedisQueueClientFallsBackToHTTPUsageQueueWhenRedisFails(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != cpaManagementUsageQueueEndpoint {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("count"); got != "2" {
+			t.Fatalf("expected count=2, got %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Fatalf("expected management Authorization header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"a":1},{"b":2}]`))
+	}))
+	defer server.Close()
+
+	client := NewRedisQueueClient(server.URL, "127.0.0.1:1", "secret", 10*time.Millisecond, ManagementUsageQueueKey, 2)
+	client.httpClient.httpClient = server.Client()
+	messages, err := client.PopUsage(ctxWithTimeout(t))
+	if err != nil {
+		t.Fatalf("PopUsage returned error: %v", err)
+	}
+	if len(messages) != 2 || messages[0] != `{"a":1}` || messages[1] != `{"b":2}` {
+		t.Fatalf("unexpected messages: %#v", messages)
+	}
+}
+
+func TestRedisQueueClientPrefersRedisBeforeHTTPFallback(t *testing.T) {
+	redisServer := newRedisQueueTestServer(t, func(t *testing.T, conn net.Conn) {
+		reader := bufio.NewReader(conn)
+		readRESPCommand(t, reader)
+		fmt.Fprint(conn, "+OK\r\n")
+		readRESPCommand(t, reader)
+		fmt.Fprint(conn, "*1\r\n$7\r\n{\"r\":1}\r\n")
+	})
+	httpCalled := false
+	httpServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalled = true
+		_, _ = w.Write([]byte(`[{"h":1}]`))
+	}))
+	defer httpServer.Close()
+
+	client := NewRedisQueueClient(httpServer.URL, redisServer.URL, "secret", time.Second, ManagementUsageQueueKey, 2)
+	client.httpClient.httpClient = httpServer.Client()
+	messages, err := client.PopUsage(ctxWithTimeout(t))
+	if err != nil {
+		t.Fatalf("PopUsage returned error: %v", err)
+	}
+	if httpCalled {
+		t.Fatal("expected redis success to skip http fallback")
+	}
+	if len(messages) != 1 || messages[0] != `{"r":1}` {
 		t.Fatalf("unexpected messages: %#v", messages)
 	}
 }
@@ -62,47 +120,6 @@ func TestRedisQueueClientClassifiesAuthErrors(t *testing.T) {
 
 	client := NewRedisQueueClient(server.URL, "", "wrong", time.Second, ManagementUsageQueueKey, 1000)
 	_, err := client.PopUsage(ctxWithTimeout(t))
-	if err == nil {
-		t.Fatal("expected auth error")
-	}
-	if !errors.Is(err, ErrRedisQueueAuth) {
-		t.Fatalf("expected ErrRedisQueueAuth, got %v", err)
-	}
-}
-
-func TestRedisQueueClientProbeAuthenticatesWithoutPopping(t *testing.T) {
-	server := newRedisQueueTestServer(t, func(t *testing.T, conn net.Conn) {
-		reader := bufio.NewReader(conn)
-		if got := readRESPCommand(t, reader); strings.Join(got, " ") != cpaManagementRedisAuthCommand+" secret" {
-			t.Fatalf("unexpected auth command: %v", got)
-		}
-		fmt.Fprint(conn, "+OK\r\n")
-		if err := conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
-			t.Fatalf("set read deadline: %v", err)
-		}
-		line, err := reader.ReadString('\n')
-		if err == nil {
-			t.Fatalf("expected probe to close without pop command, got %q", line)
-		}
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			t.Fatal("probe left connection open waiting for another command")
-		}
-	})
-
-	client := NewRedisQueueClient(server.URL, "", "secret", time.Second, ManagementUsageQueueKey, 2)
-	if err := client.Probe(ctxWithTimeout(t)); err != nil {
-		t.Fatalf("Probe returned error: %v", err)
-	}
-}
-
-func TestRedisQueueClientProbeClassifiesAuthErrors(t *testing.T) {
-	server := newRedisQueueTestServer(t, func(t *testing.T, conn net.Conn) {
-		readRESPCommand(t, bufio.NewReader(conn))
-		fmt.Fprint(conn, "-ERR invalid password\r\n")
-	})
-
-	client := NewRedisQueueClient(server.URL, "", "wrong", time.Second, ManagementUsageQueueKey, 1000)
-	err := client.Probe(ctxWithTimeout(t))
 	if err == nil {
 		t.Fatal("expected auth error")
 	}

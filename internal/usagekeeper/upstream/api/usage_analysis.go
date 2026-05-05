@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/redact"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
-	"github.com/gin-gonic/gin"
 )
 
 type usageAnalysisResponse struct {
@@ -15,17 +15,17 @@ type usageAnalysisResponse struct {
 }
 
 type usageAnalysisAPIPayload struct {
-	APIKey         string                      `json:"api_key"`
-	DisplayName    string                      `json:"display_name"`
-	TotalRequests  int64                       `json:"total_requests"`
-	SuccessCount   int64                       `json:"success_count"`
-	FailureCount   int64                       `json:"failure_count"`
-	InputTokens    int64                       `json:"input_tokens"`
-	OutputTokens   int64                       `json:"output_tokens"`
-	ReasoningTokens int64                      `json:"reasoning_tokens"`
-	CachedTokens   int64                       `json:"cached_tokens"`
-	TotalTokens    int64                       `json:"total_tokens"`
-	Models         []usageAnalysisModelPayload `json:"models"`
+	APIKey          string                      `json:"api_key"`
+	DisplayName     string                      `json:"display_name"`
+	TotalRequests   int64                       `json:"total_requests"`
+	SuccessCount    int64                       `json:"success_count"`
+	FailureCount    int64                       `json:"failure_count"`
+	InputTokens     int64                       `json:"input_tokens"`
+	OutputTokens    int64                       `json:"output_tokens"`
+	ReasoningTokens int64                       `json:"reasoning_tokens"`
+	CachedTokens    int64                       `json:"cached_tokens"`
+	TotalTokens     int64                       `json:"total_tokens"`
+	Models          []usageAnalysisModelPayload `json:"models"`
 }
 
 type usageAnalysisModelPayload struct {

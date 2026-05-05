@@ -6,110 +6,120 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/redact"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
 )
 
-const (
-	usageIdentityAuthTypeOAuth  = 1
-	usageIdentityAuthTypeAPIKey = 2
-)
-
 type usageIdentitiesResponse struct {
-	Identities []usageIdentityPayload `json:"identities"`
+	Identities []usageIdentityResponse `json:"identities"`
 }
 
-type usageIdentityPayload struct {
-	ID                         int64   `json:"id"`
-	Name                       string  `json:"name"`
-	AuthType                   int     `json:"auth_type"`
-	AuthTypeName               string  `json:"auth_type_name"`
-	Identity                   string  `json:"identity"`
-	Type                       string  `json:"type"`
-	Provider                   string  `json:"provider"`
-	TotalRequests              int64   `json:"total_requests"`
-	SuccessCount               int64   `json:"success_count"`
-	FailureCount               int64   `json:"failure_count"`
-	InputTokens                int64   `json:"input_tokens"`
-	OutputTokens               int64   `json:"output_tokens"`
-	ReasoningTokens            int64   `json:"reasoning_tokens"`
-	CachedTokens               int64   `json:"cached_tokens"`
-	TotalTokens                int64   `json:"total_tokens"`
-	LastAggregatedUsageEventID int64   `json:"last_aggregated_usage_event_id"`
-	FirstUsedAt                *string `json:"first_used_at,omitempty"`
-	LastUsedAt                 *string `json:"last_used_at,omitempty"`
-	StatsUpdatedAt             *string `json:"stats_updated_at,omitempty"`
-	IsDeleted                  bool    `json:"is_deleted"`
-	CreatedAt                  string  `json:"created_at"`
-	UpdatedAt                  string  `json:"updated_at"`
-	DeletedAt                  *string `json:"deleted_at,omitempty"`
+type usageIdentityResponse struct {
+	ID                         uint                         `json:"id"`
+	Name                       string                       `json:"name"`
+	AuthType                   models.UsageIdentityAuthType `json:"auth_type"`
+	AuthTypeName               string                       `json:"auth_type_name"`
+	Identity                   string                       `json:"identity"`
+	Type                       string                       `json:"type"`
+	Provider                   string                       `json:"provider"`
+	TotalRequests              int64                        `json:"total_requests"`
+	SuccessCount               int64                        `json:"success_count"`
+	FailureCount               int64                        `json:"failure_count"`
+	InputTokens                int64                        `json:"input_tokens"`
+	OutputTokens               int64                        `json:"output_tokens"`
+	ReasoningTokens            int64                        `json:"reasoning_tokens"`
+	CachedTokens               int64                        `json:"cached_tokens"`
+	TotalTokens                int64                        `json:"total_tokens"`
+	LastAggregatedUsageEventID uint                         `json:"last_aggregated_usage_event_id"`
+	FirstUsedAt                *time.Time                   `json:"first_used_at,omitempty"`
+	LastUsedAt                 *time.Time                   `json:"last_used_at,omitempty"`
+	StatsUpdatedAt             *time.Time                   `json:"stats_updated_at,omitempty"`
+	IsDeleted                  bool                         `json:"is_deleted"`
+	CreatedAt                  time.Time                    `json:"created_at"`
+	UpdatedAt                  time.Time                    `json:"updated_at"`
+	DeletedAt                  *time.Time                   `json:"deleted_at,omitempty"`
 }
 
-func registerUsageIdentitiesRoute(
-	router gin.IRoutes,
-	usageProvider service.UsageProvider,
-	authFileProvider service.AuthFileProvider,
-	providerMetadataProvider service.ProviderMetadataProvider,
-) {
+func registerUsageIdentityRoutes(router gin.IRoutes, usageIdentityProvider service.UsageIdentityProvider) {
 	router.GET("/usage/identities", func(c *gin.Context) {
-		if usageProvider == nil {
-			c.JSON(http.StatusOK, usageIdentitiesResponse{Identities: []usageIdentityPayload{}})
+		if usageIdentityProvider == nil {
+			c.JSON(http.StatusOK, usageIdentitiesResponse{Identities: []usageIdentityResponse{}})
 			return
 		}
 
-		filter, err := parseUsageFilterQuery(c.Request, time.Now().UTC())
+		items, err := usageIdentityProvider.ListUsageIdentities(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			writeInternalError(c, "list usage identities failed", err)
 			return
 		}
 
-		rows, err := usageProvider.ListUsageCredentialStats(c.Request.Context(), filter)
-		if err != nil {
-			writeInternalError(c, "list usage identity stats failed", err)
-			return
+		response := make([]usageIdentityResponse, 0, len(items))
+		for _, item := range items {
+			response = append(response, mapUsageIdentityResponse(item))
 		}
-
-		authFiles, providerMetadata, err := loadUsageResolutionData(c, authFileProvider, providerMetadataProvider)
-		if err != nil {
-			writeInternalError(c, "load usage resolution data failed", err)
-			return
-		}
-		resolver := newUsageSourceResolver(authFiles, providerMetadata)
-		c.JSON(http.StatusOK, usageIdentitiesResponse{Identities: buildUsageIdentitiesPayload(rows, resolver)})
+		c.JSON(http.StatusOK, usageIdentitiesResponse{Identities: response})
 	})
 }
 
-func buildUsageIdentitiesPayload(rows []service.UsageCredentialStat, resolver usageSourceResolver) []usageIdentityPayload {
-	if len(rows) == 0 {
-		return []usageIdentityPayload{}
+func mapUsageIdentityResponse(item models.UsageIdentity) usageIdentityResponse {
+	identity := item.Identity
+	name := item.Name
+	identityType := item.Type
+	provider := item.Provider
+	if item.AuthType == models.UsageIdentityAuthTypeAIProvider {
+		identity = redact.APIKeyDisplayName(item.Identity)
+		identityType = safeAIProviderDisplayValue(item.Type, item.Identity, item.AuthTypeName)
+		provider = safeAIProviderDisplayValue(item.Provider, item.Identity, firstNonEmptyString(identityType, identity))
+		name = safeAIProviderDisplayValue(item.Name, item.Identity, firstNonEmptyString(provider, identityType, identity))
 	}
 
-	credentials := buildUsageCredentialsPayload(rows, resolver)
-	now := time.Now().UTC().Format(time.RFC3339)
-	identities := make([]usageIdentityPayload, 0, len(credentials))
-	for index, credential := range credentials {
-		authType, authTypeName := usageIdentityAuthFields(credential.SourceType, credential.SourceKey)
-		identities = append(identities, usageIdentityPayload{
-			ID:            int64(index + 1),
-			Name:          credential.Source,
-			AuthType:      authType,
-			AuthTypeName:  authTypeName,
-			Identity:      credential.Source,
-			Type:          credential.SourceType,
-			Provider:      credential.SourceType,
-			TotalRequests: credential.TotalCount,
-			SuccessCount:  credential.SuccessCount,
-			FailureCount:  credential.FailureCount,
-			IsDeleted:     false,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		})
+	return usageIdentityResponse{
+		ID:                         item.ID,
+		Name:                       name,
+		AuthType:                   item.AuthType,
+		AuthTypeName:               item.AuthTypeName,
+		Identity:                   identity,
+		Type:                       identityType,
+		Provider:                   provider,
+		TotalRequests:              item.TotalRequests,
+		SuccessCount:               item.SuccessCount,
+		FailureCount:               item.FailureCount,
+		InputTokens:                item.InputTokens,
+		OutputTokens:               item.OutputTokens,
+		ReasoningTokens:            item.ReasoningTokens,
+		CachedTokens:               item.CachedTokens,
+		TotalTokens:                item.TotalTokens,
+		LastAggregatedUsageEventID: item.LastAggregatedUsageEventID,
+		FirstUsedAt:                item.FirstUsedAt,
+		LastUsedAt:                 item.LastUsedAt,
+		StatsUpdatedAt:             item.StatsUpdatedAt,
+		IsDeleted:                  item.IsDeleted,
+		CreatedAt:                  item.CreatedAt,
+		UpdatedAt:                  item.UpdatedAt,
+		DeletedAt:                  item.DeletedAt,
 	}
-	return identities
 }
 
-func usageIdentityAuthFields(sourceType, sourceKey string) (int, string) {
-	if strings.HasPrefix(sourceKey, "auth:") {
-		return usageIdentityAuthTypeOAuth, "oauth"
+func safeAIProviderDisplayValue(value, rawIdentity, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
 	}
-	return usageIdentityAuthTypeAPIKey, "apikey"
+	if isSensitiveUsageIdentityValue(trimmed, rawIdentity) {
+		return fallback
+	}
+	return trimmed
+}
+
+func isSensitiveUsageIdentityValue(value, rawIdentity string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if raw := strings.TrimSpace(rawIdentity); raw != "" && strings.Contains(trimmed, raw) {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.Contains(lower, "sk-") || strings.Contains(lower, "aiza") || strings.Contains(lower, "cr_") || strings.Contains(lower, "cr-")
 }

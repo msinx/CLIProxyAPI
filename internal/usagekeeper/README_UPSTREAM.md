@@ -2,8 +2,7 @@
 
 Upstream repository: https://github.com/Willxup/cpa-usage-keeper
 Imported branch: main
-Imported backend planning commit: a6abe9021aaab39a7a9e2fb18386c9f0208fb34c
-Imported frontend snapshot commit: 0f39eee282db0dfe04c3dc5e30c3326a74a7db1b
+Imported backend/frontend snapshot commit: aec8eebd0a6f1b15b6f1ce19905cc9b0286a669b
 
 ## Purpose
 
@@ -24,7 +23,7 @@ CLIProxyAPI release and container builds currently use `CGO_ENABLED=0`. The embe
    - `/usage` base path configuration
    - management-key-to-session authentication bridge
    - in-process usage ingestion adapter
-   - non-secret usage source and provider metadata lookup keys
+   - non-secret usage source and usage identity lookup keys
    - cancellable maintenance worker
    - embedded dashboard asset binding
 5. Run:

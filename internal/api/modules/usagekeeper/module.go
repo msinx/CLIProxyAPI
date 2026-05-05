@@ -101,11 +101,10 @@ func (m *Module) register(ctx modules.Context) error {
 		root.Group("/api/v1"),
 		app,
 		app.UsageProvider,
-		app.AuthFileProvider,
-		app.ProviderMetadataProvider,
 		app.PricingProvider,
 		authConfig,
 		authHandler,
+		app.UsageIdentityProvider,
 	)
 	root.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 

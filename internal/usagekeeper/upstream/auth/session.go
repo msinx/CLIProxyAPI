@@ -75,9 +75,6 @@ func (m *SessionManager) CleanupExpired() {
 }
 
 func (m *SessionManager) InvalidateAll() {
-	if m == nil {
-		return
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions = make(map[string]time.Time)

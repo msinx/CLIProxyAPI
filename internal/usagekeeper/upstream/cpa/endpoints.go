@@ -1,7 +1,6 @@
 package cpa
 
 const (
-	cpaManagementUsageExportEndpoint         = "/v0/management/usage/export"
 	cpaManagementAuthFilesEndpoint           = "/v0/management/auth-files"
 	cpaManagementExternalAPIKeysEndpoint     = "/v0/management/api-keys"
 	cpaManagementVertexAPIKeyEndpoint        = "/v0/management/vertex-api-key"
@@ -10,6 +9,7 @@ const (
 	cpaManagementClaudeAPIKeyEndpoint        = "/v0/management/claude-api-key"
 	cpaManagementAmpcodeEndpoint             = "/v0/management/ampcode"
 	cpaManagementOpenAICompatibilityEndpoint = "/v0/management/openai-compatibility"
+	cpaManagementUsageQueueEndpoint          = "/v0/management/usage-queue"
 	cpaModelsEndpoint                        = "/v1/models"
 
 	cpaManagementRedisNetwork     = "tcp"
