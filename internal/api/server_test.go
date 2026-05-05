@@ -17,6 +17,7 @@ import (
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v6/sdk/config"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -144,6 +145,87 @@ func TestManagementUsageRequiresManagementAuthAndPopsArray(t *testing.T) {
 
 	if remaining := redisqueue.PopOldest(1); len(remaining) != 0 {
 		t.Fatalf("remaining queue = %q, want empty", remaining)
+	}
+}
+
+func TestUsageDashboardMountsWithoutManagementSecret(t *testing.T) {
+	server := newTestServer(t)
+	t.Cleanup(func() {
+		if server.usageKeeperModule != nil {
+			if err := server.usageKeeperModule.Close(); err != nil {
+				t.Fatalf("usage keeper close: %v", err)
+			}
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/usage", nil)
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /usage status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "CPA USAGE KEEPER") || !strings.Contains(rr.Body.String(), `window.__APP_BASE_PATH__ = "/usage"`) {
+		t.Fatalf("GET /usage did not return usage shell: %s", rr.Body.String())
+	}
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/usage/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, loginReq)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("login without management secret status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUsageDashboardSessionsInvalidateOnManagementSecretChange(t *testing.T) {
+	hashedSecret, err := bcrypt.GenerateFromPassword([]byte("test-secret"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash secret: %v", err)
+	}
+	server := newTestServer(t)
+	server.cfg.RemoteManagement.SecretKey = string(hashedSecret)
+	t.Cleanup(func() {
+		if server.usageKeeperModule != nil {
+			if err := server.usageKeeperModule.Close(); err != nil {
+				t.Fatalf("usage keeper close: %v", err)
+			}
+		}
+	})
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/usage/api/v1/auth/login", strings.NewReader(`{"password":"test-secret"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginReq.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, loginReq)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("login status = %d, want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	cookies := rr.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login did not set a session cookie")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/usage/api/v1/status", nil)
+	req.AddCookie(cookies[0])
+	rr = httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status before invalidation = %d, want 200", rr.Code)
+	}
+
+	cfg := *server.cfg
+	updatedSecret, err := bcrypt.GenerateFromPassword([]byte("updated-secret"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash updated secret: %v", err)
+	}
+	cfg.RemoteManagement.SecretKey = string(updatedSecret)
+	server.UpdateClients(&cfg)
+
+	rr = httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status after invalidation = %d, want 401; body=%s", rr.Code, rr.Body.String())
 	}
 }
 

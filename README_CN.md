@@ -76,7 +76,13 @@ CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-fo
 
 ## 使用量统计
 
-自v6.10.0版本以后，CLIProxyAPI及 [CPAMC](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) 项目不再预置数据统计功能，如果有数据统计需求的请使用以下项目：
+本 fork 内置 CPA Usage Keeper 看板，访问路径为 `/usage`。它会把请求用量写入本地 SQLite 数据库 `data/usage-keeper.db`，仪表盘静态资源随 CLIProxyAPI 二进制一起提供，并复用现有管理密钥创建 `/usage` 会话 Cookie。
+
+`usage-statistics-enabled` 只控制用量写入。设为 `false` 时，`/usage` 仍会挂载，SQLite 数据库仍可打开，但新的代理请求用量不会写入。
+
+官方 CPAMC 管理面板仍与 `/usage` 分离；使用量看板不依赖 CPAMC 前端发布资源。
+
+如果你希望在进程外独立运行用量统计，也可以使用以下项目：
 
 ### [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)
 

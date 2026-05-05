@@ -140,6 +140,55 @@ func TestAuthLoginAllowsCorrectPasswordAfterRateLimitThreshold(t *testing.T) {
 	}
 }
 
+func TestAuthLoginRateLimitFailuresExpire(t *testing.T) {
+	sessions := auth.NewSessionManager(time.Hour)
+	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}
+	handler := NewAuthHandler(config, sessions)
+	now := time.Date(2026, 5, 5, 8, 0, 0, 0, time.UTC)
+	handler.now = func() time.Time { return now }
+	router := NewRouter("", nil, nil, nil, nil, nil, config, handler, "")
+
+	for i := 0; i < 5; i++ {
+		resp := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "198.51.100.3:1234"
+		router.ServeHTTP(resp, req)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("expected failed attempt %d to return 401, got %d", i+1, resp.Code)
+		}
+	}
+
+	now = now.Add(failedLoginWindow + time.Second)
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "198.51.100.3:1234"
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("expected expired failures to allow a fresh 401 attempt, got %d", resp.Code)
+	}
+}
+
+func TestAuthLoginClearsExpiredFailureEntries(t *testing.T) {
+	handler := NewAuthHandler(AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}, auth.NewSessionManager(time.Hour))
+	now := time.Date(2026, 5, 5, 8, 0, 0, 0, time.UTC)
+	handler.now = func() time.Time { return now }
+	handler.recordFailedAttempt("198.51.100.4")
+	handler.recordFailedAttempt("198.51.100.5")
+
+	now = now.Add(failedLoginWindow + time.Second)
+	if handler.tooManyFailedAttempts("198.51.100.4") {
+		t.Fatal("expected expired failure entry to be ignored")
+	}
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	if _, ok := handler.failedAttempts["198.51.100.4"]; ok {
+		t.Fatal("expected checked expired failure entry to be removed")
+	}
+}
+
 func TestAuthLogoutDeletesSessionCookie(t *testing.T) {
 	sessions := auth.NewSessionManager(time.Hour)
 	config := AuthConfig{Enabled: true, LoginPassword: "secret", SessionTTL: time.Hour}

@@ -1,5 +1,9 @@
 version: 2
 
+before:
+  hooks:
+    - scripts/build-usage-keeper-assets.sh
+
 builds:
   - id: "cli-proxy-api"
     env:

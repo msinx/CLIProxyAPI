@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/poller"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
-	"github.com/gin-gonic/gin"
 )
 
 const appBasePathPlaceholder = "__APP_BASE_PATH__"
@@ -45,8 +45,8 @@ type SyncRunner interface {
 	SyncNow(ctx context.Context) error
 }
 
-func NewRouter(
-	staticDir string,
+func RegisterEmbeddedRoutes(
+	apiV1 *gin.RouterGroup,
 	statusProvider StatusProvider,
 	usageProvider service.UsageProvider,
 	authFileProvider service.AuthFileProvider,
@@ -54,15 +54,7 @@ func NewRouter(
 	pricingProvider service.PricingProvider,
 	authConfig AuthConfig,
 	authHandler *authHandler,
-	basePath string,
-) *gin.Engine {
-	router := gin.New()
-	router.Use(gin.Recovery())
-
-	appGroup := router.Group(basePath)
-	registerHealthRoutes(appGroup)
-
-	apiV1 := appGroup.Group("/api/v1")
+) {
 	apiV1.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	})
@@ -81,9 +73,39 @@ func NewRouter(
 	registerUsageAnalysisRoute(protected, usageProvider)
 	registerUsageEventsRoute(protected, usageProvider, authFileProvider, providerMetadataProvider)
 	registerUsageCredentialsRoute(protected, usageProvider, authFileProvider, providerMetadataProvider)
+	registerUsageIdentitiesRoute(protected, usageProvider, authFileProvider, providerMetadataProvider)
 	registerAuthFileRoutes(protected, authFileProvider)
 	registerProviderMetadataRoutes(protected, providerMetadataProvider)
 	registerPricingRoutes(protected, pricingProvider)
+}
+
+func NewRouter(
+	staticDir string,
+	statusProvider StatusProvider,
+	usageProvider service.UsageProvider,
+	authFileProvider service.AuthFileProvider,
+	providerMetadataProvider service.ProviderMetadataProvider,
+	pricingProvider service.PricingProvider,
+	authConfig AuthConfig,
+	authHandler *authHandler,
+	basePath string,
+) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Recovery())
+
+	appGroup := router.Group(basePath)
+	registerHealthRoutes(appGroup)
+
+	RegisterEmbeddedRoutes(
+		appGroup.Group("/api/v1"),
+		statusProvider,
+		usageProvider,
+		authFileProvider,
+		providerMetadataProvider,
+		pricingProvider,
+		authConfig,
+		authHandler,
+	)
 
 	if staticDir != "" {
 		if info, err := os.Stat(staticDir); err == nil && info.IsDir() {

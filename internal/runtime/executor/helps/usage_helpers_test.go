@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 )
 
@@ -118,6 +119,25 @@ func TestUsageReporterBuildRecordIncludesRequestedModelAlias(t *testing.T) {
 	}
 	if record.Alias != "client-gpt" {
 		t.Fatalf("alias = %q, want %q", record.Alias, "client-gpt")
+	}
+}
+
+func TestUsageReporterUsesStableConfigSourceBeforeRawAPIKey(t *testing.T) {
+	reporter := NewUsageReporter(context.Background(), "gemini", "gemini-2.5-pro", &cliproxyauth.Auth{
+		ID:       "auth-1",
+		Provider: "gemini",
+		Attributes: map[string]string{
+			"api_key": "raw-secret-key",
+			"source":  "config:gemini[token]",
+		},
+	})
+
+	record := reporter.buildRecord(usage.Detail{TotalTokens: 1}, false)
+	if record.Source != "config:gemini[token]" {
+		t.Fatalf("source = %q, want stable config source", record.Source)
+	}
+	if record.Source == "raw-secret-key" {
+		t.Fatalf("raw API key leaked into usage source")
 	}
 }
 
