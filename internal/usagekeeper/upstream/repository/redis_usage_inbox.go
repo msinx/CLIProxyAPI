@@ -18,7 +18,8 @@ const (
 	RedisUsageInboxStatusProcessFailed = "process_failed"
 	RedisUsageInboxStatusDiscarded     = "discarded"
 
-	redisUsageInboxMaxErrorLength = 1024
+	redisUsageInboxMaxErrorLength     = 1024
+	redisUsageInboxMaxProcessAttempts = 5
 )
 
 type RedisInboxInsert struct {
@@ -58,20 +59,9 @@ func InsertRedisUsageInboxMessages(db *gorm.DB, inputs []RedisInboxInsert) ([]mo
 	return rows, nil
 }
 
-func MarkRedisUsageInboxProcessed(db *gorm.DB, id uint, snapshotRunID uint, eventKey string, processedAt time.Time) error {
+func MarkRedisUsageInboxProcessed(db *gorm.DB, id uint, eventKey string, processedAt time.Time) error {
 	return db.Model(&models.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
 		"status":          RedisUsageInboxStatusProcessed,
-		"snapshot_run_id": snapshotRunID,
-		"usage_event_key": eventKey,
-		"processed_at":    processedAt.UTC(),
-		"last_error":      "",
-	}).Error
-}
-
-func MarkRedisUsageInboxProcessedWithoutSnapshot(db *gorm.DB, id uint, eventKey string, processedAt time.Time) error {
-	return db.Model(&models.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
-		"status":          RedisUsageInboxStatusProcessed,
-		"snapshot_run_id": nil,
 		"usage_event_key": eventKey,
 		"processed_at":    processedAt.UTC(),
 		"last_error":      "",
@@ -83,10 +73,20 @@ func MarkRedisUsageInboxDecodeFailed(db *gorm.DB, id uint, decodeErr error) erro
 }
 
 func MarkRedisUsageInboxProcessFailed(db *gorm.DB, id uint, processErr error) error {
-	return markRedisUsageInboxFailed(db, id, RedisUsageInboxStatusProcessFailed, processErr)
+	return db.Model(&models.RedisUsageInbox{}).Where("id = ?", id).Updates(map[string]any{
+		"status": gorm.Expr(
+			"CASE WHEN attempt_count + ? >= ? THEN ? ELSE ? END",
+			1,
+			redisUsageInboxMaxProcessAttempts,
+			RedisUsageInboxStatusDiscarded,
+			RedisUsageInboxStatusProcessFailed,
+		),
+		"attempt_count": gorm.Expr("attempt_count + ?", 1),
+		"last_error":    boundedRedisUsageInboxError(processErr),
+	}).Error
 }
 
-// ListProcessableRedisUsageInbox 返回待处理和可重试的数据，不返回已解码失败或已丢弃的数据。
+// ListProcessableRedisUsageInbox returns pending and retryable rows.
 func ListProcessableRedisUsageInbox(db *gorm.DB, limit int) ([]models.RedisUsageInbox, error) {
 	query := db.Where("status = ? OR status = ?", RedisUsageInboxStatusPending, RedisUsageInboxStatusProcessFailed).Order("id asc")
 	if limit > 0 {
@@ -111,8 +111,8 @@ func ListPendingRedisUsageInbox(db *gorm.DB, limit int) ([]models.RedisUsageInbo
 	return rows, nil
 }
 
-// CleanupRedisUsageInbox 清理已完成和失败的 Redis inbox 原始消息，pending 数据永远不在这里删除。
-// processed 保留到下一个本地日开始后才清理；decode_failed/process_failed/discarded 保留 7 天便于排查。
+// CleanupRedisUsageInbox removes completed and failed raw inbox messages.
+// Pending data is never deleted here.
 func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (RedisUsageInboxCleanupResult, error) {
 	localNow := now.In(time.Local)
 	localDayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)

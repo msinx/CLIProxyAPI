@@ -131,7 +131,8 @@ func buildUsageEvent(ctx context.Context, record coreusage.Record) models.UsageE
 	provider := firstNonEmpty(record.Provider, "unknown")
 	model := firstNonEmpty(record.Model, "unknown")
 	authIndex := strings.TrimSpace(record.AuthIndex)
-	source := stableUsageSource(record)
+	authType := usageAuthType(record, authIndex)
+	source := stableUsageSource(record, authType)
 	latencyMS := record.Latency.Milliseconds()
 	if latencyMS < 0 {
 		latencyMS = 0
@@ -141,10 +142,15 @@ func buildUsageEvent(ctx context.Context, record coreusage.Record) models.UsageE
 		failed = !responseWasSuccessful(ctx)
 	}
 	apiGroupKey := stableGroupKey(record)
+	requestID := runtimeRequestID(ctx)
 
 	return models.UsageEvent{
-		EventKey:        buildRuntimeEventKey(ctx, provider, model, authIndex, timestamp, latencyMS, failed, tokens),
+		EventKey:        buildRuntimeEventKey(requestID, provider, model, authIndex, timestamp, latencyMS, failed, tokens),
 		APIGroupKey:     apiGroupKey,
+		Provider:        provider,
+		Endpoint:        usageEndpoint(record),
+		AuthType:        authType,
+		RequestID:       requestID,
 		Model:           model,
 		Timestamp:       timestamp,
 		Source:          source,
@@ -182,9 +188,9 @@ func stableGroupKey(record coreusage.Record) string {
 	return "grp_" + hex.EncodeToString(sum[:16])
 }
 
-func stableUsageSource(record coreusage.Record) string {
-	if authIndex := strings.TrimSpace(record.AuthIndex); authIndex != "" {
-		return "auth:" + authIndex
+func stableUsageSource(record coreusage.Record, authType string) string {
+	if authIndex := strings.TrimSpace(record.AuthIndex); authType == "oauth" && authIndex != "" {
+		return authIndex
 	}
 	rawKey := strings.TrimSpace(record.APIKey)
 	if source := strings.TrimSpace(record.Source); source != "" {
@@ -202,11 +208,47 @@ func stableUsageSource(record coreusage.Record) string {
 	return ""
 }
 
-func buildRuntimeEventKey(ctx context.Context, provider, model, authIndex string, timestamp time.Time, latencyMS int64, failed bool, tokens cpa.TokenStats) string {
+func usageAuthType(record coreusage.Record, authIndex string) string {
+	if authType := strings.ToLower(strings.TrimSpace(record.AuthType)); authType != "" {
+		switch authType {
+		case "oauth", "apikey":
+			return authType
+		case "api_key":
+			return "apikey"
+		default:
+			return authType
+		}
+	}
+	if strings.TrimSpace(authIndex) != "" {
+		return "oauth"
+	}
+	if strings.TrimSpace(record.Source) != "" || strings.TrimSpace(record.APIKey) != "" {
+		return "apikey"
+	}
+	return ""
+}
+
+func usageEndpoint(record coreusage.Record) string {
+	source := strings.TrimSpace(record.Source)
+	rawKey := strings.TrimSpace(record.APIKey)
+	if source == "" || source == rawKey {
+		return ""
+	}
+	if strings.Contains(strings.ToLower(source), "sk-") || strings.Contains(strings.ToLower(source), "aiza") {
+		return ""
+	}
+	return source
+}
+
+func runtimeRequestID(ctx context.Context) string {
 	requestID := strings.TrimSpace(internallogging.GetRequestID(ctx))
 	if requestID == "" {
 		requestID = BuildFallbackEventID(ctx)
 	}
+	return requestID
+}
+
+func buildRuntimeEventKey(requestID, provider, model, authIndex string, timestamp time.Time, latencyMS int64, failed bool, tokens cpa.TokenStats) string {
 	payload := strings.Join([]string{
 		requestID,
 		provider,

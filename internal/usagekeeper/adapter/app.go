@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	upstreamauth "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/auth"
 	upstreamconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/config"
@@ -19,14 +20,13 @@ import (
 )
 
 type App struct {
-	Config                   Config
-	DB                       *gorm.DB
-	UsageProvider            service.UsageProvider
-	AuthFileProvider         service.AuthFileProvider
-	ProviderMetadataProvider service.ProviderMetadataProvider
-	PricingProvider          service.PricingProvider
-	Plugin                   *Plugin
-	Sessions                 *upstreamauth.SessionManager
+	Config                Config
+	DB                    *gorm.DB
+	UsageProvider         service.UsageProvider
+	UsageIdentityProvider service.UsageIdentityProvider
+	PricingProvider       service.PricingProvider
+	Plugin                *Plugin
+	Sessions              *upstreamauth.SessionManager
 
 	sqlDB     *sql.DB
 	status    *StatusProvider
@@ -95,8 +95,7 @@ func NewAppWithOptions(cfg Config, opts Options) (*App, error) {
 	app.DB = db
 	app.sqlDB = sqlDB
 	app.UsageProvider = service.NewUsageService(db)
-	app.AuthFileProvider = service.NewAuthFileService(db)
-	app.ProviderMetadataProvider = service.NewProviderMetadataService(db)
+	app.UsageIdentityProvider = service.NewUsageIdentityService(db)
 	app.PricingProvider = service.NewPricingService(db)
 	app.store = &usageStore{db: db}
 	app.Plugin.SetStore(app.store)
@@ -177,6 +176,10 @@ func (a *App) SyncNow(ctx context.Context) error {
 		a.status.MarkSyncWarning(err)
 		return err
 	}
+	if err := a.AggregateUsageIdentities(ctx); err != nil {
+		a.status.MarkSyncWarning(err)
+		return err
+	}
 	a.status.MarkSyncCompleted()
 	return nil
 }
@@ -201,4 +204,11 @@ func (a *App) RefreshMetadata(ctx context.Context) error {
 		return nil
 	}
 	return a.metadata.RefreshUsageKeeperMetadata(ctx, a.DB)
+}
+
+func (a *App) AggregateUsageIdentities(ctx context.Context) error {
+	if a == nil || a.DB == nil {
+		return nil
+	}
+	return repository.AggregateUsageIdentityStats(ctx, a.DB, time.Now().UTC())
 }

@@ -26,6 +26,9 @@ func (a *App) RunMaintenance(ctx context.Context) error {
 	if _, err := repository.CleanupStorage(a.DB, now); err != nil {
 		return err
 	}
+	if err := a.AggregateUsageIdentities(ctx); err != nil {
+		return err
+	}
 	if a.Config.BackupEnabled && a.sqlDB != nil {
 		writer := backup.NewWriter(a.Config.BackupDir)
 		if _, err := writer.WriteDatabase(ctx, a.sqlDB, now); err != nil {

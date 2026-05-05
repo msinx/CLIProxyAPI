@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"io/fs"
+	"log/slog"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,15 +46,18 @@ type SyncRunner interface {
 	SyncNow(ctx context.Context) error
 }
 
+type syncUserMessageError interface {
+	UserMessage() string
+}
+
 func RegisterEmbeddedRoutes(
 	apiV1 *gin.RouterGroup,
 	statusProvider StatusProvider,
 	usageProvider service.UsageProvider,
-	authFileProvider service.AuthFileProvider,
-	providerMetadataProvider service.ProviderMetadataProvider,
 	pricingProvider service.PricingProvider,
 	authConfig AuthConfig,
 	authHandler *authHandler,
+	usageIdentityProviders ...service.UsageIdentityProvider,
 ) {
 	apiV1.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
@@ -65,30 +69,32 @@ func RegisterEmbeddedRoutes(
 	}
 	authHandler.registerRoutes(authGroup)
 
+	var usageIdentityProvider service.UsageIdentityProvider
+	if len(usageIdentityProviders) > 0 {
+		usageIdentityProvider = usageIdentityProviders[0]
+	}
+
 	protected := apiV1.Group("")
 	protected.Use(authHandler.middleware())
 	registerStatusRoutes(protected, statusProvider)
 	registerSyncRoutes(protected, statusProvider, &syncLimiter{window: manualSyncRateLimitWindow})
 	registerUsageOverviewRoute(protected, usageProvider)
 	registerUsageAnalysisRoute(protected, usageProvider)
-	registerUsageEventsRoute(protected, usageProvider, authFileProvider, providerMetadataProvider)
-	registerUsageCredentialsRoute(protected, usageProvider, authFileProvider, providerMetadataProvider)
-	registerUsageIdentitiesRoute(protected, usageProvider, authFileProvider, providerMetadataProvider)
-	registerAuthFileRoutes(protected, authFileProvider)
-	registerProviderMetadataRoutes(protected, providerMetadataProvider)
+	registerUsageEventsRoute(protected, usageProvider, usageIdentityProvider)
+	registerUsageCredentialsRoute(protected, usageProvider, usageIdentityProvider)
+	registerUsageIdentityRoutes(protected, usageIdentityProvider)
 	registerPricingRoutes(protected, pricingProvider)
 }
 
 func NewRouter(
-	staticDir string,
+	staticFS fs.FS,
 	statusProvider StatusProvider,
 	usageProvider service.UsageProvider,
-	authFileProvider service.AuthFileProvider,
-	providerMetadataProvider service.ProviderMetadataProvider,
 	pricingProvider service.PricingProvider,
 	authConfig AuthConfig,
 	authHandler *authHandler,
 	basePath string,
+	usageIdentityProviders ...service.UsageIdentityProvider,
 ) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -96,22 +102,14 @@ func NewRouter(
 	appGroup := router.Group(basePath)
 	registerHealthRoutes(appGroup)
 
-	RegisterEmbeddedRoutes(
-		appGroup.Group("/api/v1"),
-		statusProvider,
-		usageProvider,
-		authFileProvider,
-		providerMetadataProvider,
-		pricingProvider,
-		authConfig,
-		authHandler,
-	)
+	RegisterEmbeddedRoutes(appGroup.Group("/api/v1"), statusProvider, usageProvider, pricingProvider, authConfig, authHandler, usageIdentityProviders...)
 
-	if staticDir != "" {
-		if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
-			indexPath := filepath.Join(staticDir, "index.html")
+	if staticFS != nil {
+		if indexFile, err := staticFS.Open("index.html"); err == nil {
+			_ = indexFile.Close()
+			httpFS := http.FS(staticFS)
 			serveIndex := func(c *gin.Context) {
-				indexHTML, err := renderIndexHTML(indexPath, basePath)
+				indexHTML, err := renderIndexHTML(staticFS, basePath)
 				if err != nil {
 					c.Status(http.StatusNotFound)
 					return
@@ -120,7 +118,8 @@ func NewRouter(
 			}
 
 			appGroup.GET("/", serveIndex)
-			appGroup.Static("/assets", filepath.Join(staticDir, "assets"))
+			assetsFS, _ := fs.Sub(staticFS, "assets")
+			appGroup.StaticFS("/assets", http.FS(assetsFS))
 			router.NoRoute(func(c *gin.Context) {
 				requestPath, ok := stripBasePath(basePath, c.Request.URL.Path)
 				if !ok {
@@ -132,9 +131,10 @@ func NewRouter(
 					return
 				}
 
-				if assetPath, ok := staticAssetPath(staticDir, requestPath); ok {
-					if assetInfo, err := os.Stat(assetPath); err == nil && !assetInfo.IsDir() {
-						c.File(assetPath)
+				if assetPath, ok := staticAssetPath(requestPath); ok {
+					if assetFile, err := staticFS.Open(assetPath); err == nil {
+						_ = assetFile.Close()
+						c.FileFromFS(assetPath, httpFS)
 						return
 					}
 				}
@@ -147,8 +147,13 @@ func NewRouter(
 	return router
 }
 
-func renderIndexHTML(indexPath, basePath string) ([]byte, error) {
-	indexHTML, err := os.ReadFile(indexPath)
+func renderIndexHTML(staticFS fs.FS, basePath string) ([]byte, error) {
+	indexFile, err := staticFS.Open("index.html")
+	if err != nil {
+		return nil, err
+	}
+	defer indexFile.Close()
+	indexHTML, err := io.ReadAll(indexFile)
 	if err != nil {
 		return nil, err
 	}
@@ -171,39 +176,20 @@ func cleanURLPath(requestPath string) string {
 	return cleaned
 }
 
-func staticAssetPath(staticDir, requestPath string) (string, bool) {
+func staticAssetPath(requestPath string) (string, bool) {
 	cleaned := cleanURLPath(requestPath)
 	if strings.Contains(cleaned, "\\") {
 		return "", false
 	}
 	relPath := strings.TrimPrefix(cleaned, "/")
-	if relPath == "." || relPath == "" {
+	if relPath == "" {
 		return "", false
 	}
-	assetPath := filepath.Join(staticDir, relPath)
-	staticRoot, err := filepath.Abs(staticDir)
-	if err != nil {
-		return "", false
-	}
-	assetAbsolutePath, err := filepath.Abs(assetPath)
-	if err != nil {
-		return "", false
-	}
-	relativePath, err := filepath.Rel(staticRoot, assetAbsolutePath)
-	if err != nil || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	return assetPath, true
+	return relPath, true
 }
 
 func stripBasePath(basePath, requestPath string) (string, bool) {
 	cleaned := cleanURLPath(requestPath)
-	if cleaned == "." {
-		cleaned = "/"
-	}
-	if !strings.HasPrefix(cleaned, "/") {
-		cleaned = "/" + cleaned
-	}
 	if basePath == "" {
 		return cleaned, true
 	}
@@ -241,6 +227,14 @@ func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider) {
 	})
 }
 
+func manualSyncErrorMessage(err error) string {
+	var userMessage syncUserMessageError
+	if errors.As(err, &userMessage) && userMessage.UserMessage() != "" {
+		return userMessage.UserMessage()
+	}
+	return "manual sync failed"
+}
+
 func registerSyncRoutes(router gin.IRoutes, statusProvider StatusProvider, limiter *syncLimiter) {
 	router.POST("/sync", func(c *gin.Context) {
 		if limiter != nil && !limiter.allow(time.Now()) {
@@ -259,10 +253,9 @@ func registerSyncRoutes(router gin.IRoutes, statusProvider StatusProvider, limit
 				c.JSON(http.StatusConflict, gin.H{"error": "sync already running"})
 				return
 			}
-			if !errors.Is(err, poller.ErrSyncCompletedWithWarnings) {
-				writeInternalError(c, "manual sync failed", err)
-				return
-			}
+			slog.Error("manual sync failed", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": manualSyncErrorMessage(err)})
+			return
 		}
 
 		if statusProvider, ok := syncRunner.(StatusProvider); ok {

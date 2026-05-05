@@ -6,12 +6,6 @@ import (
 	"time"
 )
 
-type UsageExport struct {
-	Version    int                `json:"version"`
-	ExportedAt time.Time          `json:"exported_at"`
-	Usage      StatisticsSnapshot `json:"usage"`
-}
-
 type StatisticsSnapshot struct {
 	TotalRequests  int64                  `json:"total_requests"`
 	SuccessCount   int64                  `json:"success_count"`
@@ -112,6 +106,12 @@ type AuthFile struct {
 	Disabled    bool   `json:"disabled"`
 	Unavailable bool   `json:"unavailable"`
 	RuntimeOnly bool   `json:"runtime_only"`
+}
+
+type UsageQueueResult struct {
+	StatusCode int
+	Body       []byte
+	Payload    []json.RawMessage
 }
 
 type ProviderKeyConfigResult struct {
@@ -225,21 +225,17 @@ func decodeOpenAIApiKeyEntry(raw any) (OpenAIApiKeyEntry, error) {
 	case nil:
 		return OpenAIApiKeyEntry{}, nil
 	default:
-		return OpenAIApiKeyEntry{}, fmt.Errorf("decode openai api key entry: unsupported value %T", raw)
+		return OpenAIApiKeyEntry{}, fmt.Errorf("unsupported openai api key entry type %T", raw)
 	}
 }
 
 func firstString(raw map[string]any, keys ...string) string {
 	for _, key := range keys {
 		value, ok := raw[key]
-		if !ok || value == nil {
-			continue
-		}
-		text, ok := value.(string)
 		if !ok {
 			continue
 		}
-		if text != "" {
+		if text, ok := value.(string); ok {
 			return text
 		}
 	}
