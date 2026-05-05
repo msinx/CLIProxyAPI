@@ -205,6 +205,42 @@ func TestUsageEventFilterOptionsReturnsStableModelsAndSources(t *testing.T) {
 	}
 }
 
+func TestUsageIdentitiesReturnsFrontendCredentialShape(t *testing.T) {
+	provider := &usageEventsStub{credentialStats: []service.UsageCredentialStat{
+		{Source: "sk-provider-key", AuthIndex: "2", Failed: false, RequestCount: 2},
+		{Source: "sk-provider-key", AuthIndex: "2", Failed: true, RequestCount: 1},
+	}}
+	router := NewRouter(
+		"",
+		nil,
+		provider,
+		authFileStub{files: []models.AuthFile{{AuthIndex: "2", Email: "user@example.com", Type: "auth-file"}}},
+		providerMetadataStub{items: []models.ProviderMetadata{{LookupKey: "sk-provider-key", ProviderType: "openai", DisplayName: "OpenAI Mirror", ProviderKey: "openai:OpenAI Mirror"}}},
+		nil,
+		AuthConfig{},
+		nil,
+		"",
+	)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/identities", nil)
+	resp := httptest.NewRecorder()
+
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	if !contains(body, `"identities":[`) || !contains(body, `"name":"OpenAI Mirror"`) || !contains(body, `"identity":"OpenAI Mirror"`) {
+		t.Fatalf("expected frontend identity shape, got %s", body)
+	}
+	if !contains(body, `"auth_type":2`) || !contains(body, `"auth_type_name":"apikey"`) || !contains(body, `"total_requests":3`) || !contains(body, `"success_count":2`) || !contains(body, `"failure_count":1`) {
+		t.Fatalf("expected aggregated identity counters, got %s", body)
+	}
+	if contains(body, "sk-provider-key") {
+		t.Fatalf("expected raw source to be redacted from identities response: %s", body)
+	}
+}
+
 func TestUsageCredentialsReturnsAggregatedRows(t *testing.T) {
 	provider := &usageEventsStub{credentialStats: []service.UsageCredentialStat{{
 		Source:       "sk-provider-key",

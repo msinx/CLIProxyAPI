@@ -35,3 +35,5 @@ bin/*
 .bmad/*
 _bmad/*
 _bmad-output/*
+web/usage-keeper/dist/
+web/usage-keeper/node_modules/

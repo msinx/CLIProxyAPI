@@ -28,12 +28,14 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api/middleware"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/api/modules"
 	ampmodule "github.com/router-for-me/CLIProxyAPI/v7/internal/api/modules/amp"
+	usagekeepermodule "github.com/router-for-me/CLIProxyAPI/v7/internal/api/modules/usagekeeper"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/cache"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/adapter"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v7/sdk/access"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/api/handlers"
@@ -175,6 +177,8 @@ type Server struct {
 
 	// ampModule is the Amp routing module for model mapping hot-reload
 	ampModule *ampmodule.AmpModule
+	// usageKeeperModule serves the embedded /usage dashboard and SQLite adapter.
+	usageKeeperModule *usagekeepermodule.Module
 
 	// managementRoutesRegistered tracks whether the management routes have been attached to the engine.
 	managementRoutesRegistered atomic.Bool
@@ -306,6 +310,18 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	}
 	if err := modules.RegisterModule(ctx, s.ampModule); err != nil {
 		log.Errorf("Failed to register Amp module: %v", err)
+	}
+	s.usageKeeperModule = usagekeepermodule.New(usagekeepermodule.ModuleOptions{
+		MetadataRefresher: adapter.RuntimeMetadataSource{Config: cfg, AuthManager: authManager},
+		Verifier: func(clientIP string, localClient bool, provided string) (bool, int, string) {
+			if s.mgmt == nil {
+				return false, http.StatusForbidden, "management key is not configured"
+			}
+			return s.mgmt.AuthenticateManagementKey(clientIP, localClient, provided)
+		},
+	})
+	if err := modules.RegisterModule(ctx, s.usageKeeperModule); err != nil {
+		log.Errorf("Failed to register Usage Keeper module: %v", err)
 	}
 
 	// Apply additional router configurators from options
@@ -1139,6 +1155,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	if err := s.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", err)
 	}
+	if s.usageKeeperModule != nil {
+		if err := s.usageKeeperModule.Close(); err != nil {
+			return fmt.Errorf("failed to close usage keeper module: %w", err)
+		}
+	}
 
 	log.Debug("API server stopped")
 	return nil
@@ -1293,6 +1314,12 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 		s.mgmt.SetConfig(cfg)
 		s.mgmt.SetAuthManager(s.handlers.AuthManager)
 	}
+	if s.usageKeeperModule != nil && (oldCfg == nil || oldCfg.RemoteManagement.SecretKey != cfg.RemoteManagement.SecretKey) {
+		s.usageKeeperModule.InvalidateSessions()
+	}
+	if s.usageKeeperModule != nil {
+		s.usageKeeperModule.SetMetadataRefresher(adapter.RuntimeMetadataSource{Config: cfg, AuthManager: s.handlers.AuthManager})
+	}
 
 	// Notify Amp module only when Amp config has changed.
 	ampConfigChanged := oldCfg == nil || !reflect.DeepEqual(oldCfg.AmpCode, cfg.AmpCode)
@@ -1304,6 +1331,12 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 			}
 		} else {
 			log.Warnf("amp module is nil, skipping config update")
+		}
+	}
+
+	if s.usageKeeperModule != nil {
+		if err := s.usageKeeperModule.OnConfigUpdated(cfg); err != nil {
+			log.Errorf("failed to update Usage Keeper module config: %v", err)
 		}
 	}
 

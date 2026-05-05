@@ -2,7 +2,8 @@
 
 Upstream repository: https://github.com/Willxup/cpa-usage-keeper
 Imported branch: main
-Imported commit: a6abe9021aaab39a7a9e2fb18386c9f0208fb34c
+Imported backend planning commit: a6abe9021aaab39a7a9e2fb18386c9f0208fb34c
+Imported frontend snapshot commit: 0f39eee282db0dfe04c3dc5e30c3326a74a7db1b
 
 ## Purpose
 
@@ -23,19 +24,44 @@ CLIProxyAPI release and container builds currently use `CGO_ENABLED=0`. The embe
    - `/usage` base path configuration
    - management-key-to-session authentication bridge
    - in-process usage ingestion adapter
+   - non-secret usage source and provider metadata lookup keys
+   - cancellable maintenance worker
    - embedded dashboard asset binding
 5. Run:
 
 ```bash
-npm --prefix web/usage-keeper ci
 npm --prefix web/usage-keeper run typecheck
 npm --prefix web/usage-keeper run test
 npm --prefix web/usage-keeper run lint
-npm --prefix web/usage-keeper run build
+scripts/verify-usage-keeper-assets.sh
 gofmt -w internal/usagekeeper internal/api internal/config internal/watcher
 go test ./internal/usagekeeper/... ./internal/api/... ./internal/redisqueue/... ./internal/config/... ./internal/watcher/... ./test/...
 go build -o test-output ./cmd/server
 rm test-output
+```
+
+The release path is intentionally local-only: `/usage` assets are built from
+`web/usage-keeper`, synced into `internal/usagekeeper/assets/dist`, and embedded
+into the Go binary. Do not fetch CPAMC, `management.html`, or any remote release
+asset for the usage dashboard.
+
+## Exact Import Commands
+
+```bash
+rm -rf /tmp/cpa-usage-keeper
+git clone --depth=1 https://github.com/Willxup/cpa-usage-keeper.git /tmp/cpa-usage-keeper
+rsync -a --delete /tmp/cpa-usage-keeper/internal/api/ internal/usagekeeper/upstream/api/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/auth/ internal/usagekeeper/upstream/auth/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/backup/ internal/usagekeeper/upstream/backup/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/cpa/ internal/usagekeeper/upstream/cpa/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/config/ internal/usagekeeper/upstream/config/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/logging/ internal/usagekeeper/upstream/logging/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/models/ internal/usagekeeper/upstream/models/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/redact/ internal/usagekeeper/upstream/redact/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/repository/ internal/usagekeeper/upstream/repository/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/service/ internal/usagekeeper/upstream/service/
+rsync -a --delete /tmp/cpa-usage-keeper/web/ web/usage-keeper/
+scripts/build-usage-keeper-assets.sh
 ```
 
 ## Local Patch Policy

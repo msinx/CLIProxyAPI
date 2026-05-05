@@ -74,6 +74,15 @@ func (m *SessionManager) CleanupExpired() {
 	m.cleanupExpiredLocked()
 }
 
+func (m *SessionManager) InvalidateAll() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessions = make(map[string]time.Time)
+}
+
 func (m *SessionManager) cleanupExpiredLocked() {
 	now := m.now()
 	for token, expiresAt := range m.sessions {
