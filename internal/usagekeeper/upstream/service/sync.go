@@ -10,6 +10,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
+
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -65,9 +66,18 @@ type RedisInboxPullResult struct {
 
 func NewSyncService(db *gorm.DB, cfg config.Config) *SyncService {
 	return NewSyncServiceWithOptions(db, SyncServiceOptions{
-		BaseURL:       cfg.CPABaseURL,
-		Client:        cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout),
-		RedisQueue:    cpa.NewRedisQueueClient(cfg.CPABaseURL, cfg.RedisQueueAddr, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.RedisQueueKey, cfg.RedisQueueBatchSize),
+		BaseURL: cfg.CPABaseURL,
+		Client:  cpa.NewClient(cfg.CPABaseURL, cfg.CPAManagementKey, cfg.RequestTimeout, cfg.TLSSkipVerify),
+		RedisQueue: cpa.NewRedisQueueClientWithOptions(cpa.RedisQueueOptions{
+			BaseURL:       cfg.CPABaseURL,
+			RedisAddr:     cfg.RedisQueueAddr,
+			ManagementKey: cfg.CPAManagementKey,
+			Timeout:       cfg.RequestTimeout,
+			QueueKey:      cfg.RedisQueueKey,
+			BatchSize:     cfg.RedisQueueBatchSize,
+			TLS:           cfg.RedisQueueTLS,
+			TLSSkipVerify: cfg.TLSSkipVerify,
+		}),
 		RedisQueueKey: cfg.RedisQueueKey,
 	})
 }
@@ -170,8 +180,8 @@ func (s *SyncService) SyncMetadata(ctx context.Context) error {
 	return err
 }
 
-// PullRedisUsageInbox is the Redis sync pull phase: LPOP queue messages and
-// store raw payloads in redis_usage_inboxes without decoding or writing usage_events.
+// PullRedisUsageInbox is the Redis sync pull phase: LPOP queue messages and store raw payloads in redis_usage_inboxes.
+// This phase does not decode messages or write usage_events.
 func (s *SyncService) PullRedisUsageInbox(ctx context.Context) (*RedisInboxPullResult, error) {
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return nil, err
@@ -204,7 +214,7 @@ func (s *SyncService) PullRedisUsageInbox(ctx context.Context) (*RedisInboxPullR
 	return &RedisInboxPullResult{Status: "completed", InsertedRows: len(inboxRows)}, nil
 }
 
-// ProcessRedisUsageInbox reads pending/process_failed inbox rows and writes usage_events.
+// ProcessRedisUsageInbox is the local processing phase: read pending/process_failed inbox rows and write usage_events.
 func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*RedisBatchSyncResult, error) {
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return nil, err
@@ -221,7 +231,7 @@ func (s *SyncService) ProcessRedisUsageInbox(ctx context.Context) (*RedisBatchSy
 	return s.processRedisInboxRows(processableRows, fetchedAt)
 }
 
-// CleanupRedisUsageInbox only cleans the Redis inbox table.
+// CleanupRedisUsageInbox only cleans the Redis inbox table, for tests and standalone maintenance.
 func (s *SyncService) CleanupRedisUsageInbox(ctx context.Context) error {
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return err
@@ -230,7 +240,7 @@ func (s *SyncService) CleanupRedisUsageInbox(ctx context.Context) error {
 	return err
 }
 
-// CleanupStorage is the unified maintenance entry point.
+// CleanupStorage is the daily maintenance entry point: clean the Redis inbox first, then VACUUM SQLite.
 func (s *SyncService) CleanupStorage(ctx context.Context) error {
 	if err := s.validate(syncMetadataOptional); err != nil {
 		return err
@@ -239,8 +249,7 @@ func (s *SyncService) CleanupStorage(ctx context.Context) error {
 	return err
 }
 
-// SyncRedisBatch is the compatibility entry point: process local inbox rows,
-// then pull Redis once and process immediately if the local inbox was empty.
+// SyncRedisBatch remains the compatibility entry point: process local inbox rows, then pull Redis once and process immediately if the local inbox was empty.
 func (s *SyncService) SyncRedisBatch(ctx context.Context) (*RedisBatchSyncResult, error) {
 	if result, err := s.ProcessRedisUsageInbox(ctx); err != nil || result == nil || !result.Empty {
 		return result, err
@@ -606,6 +615,7 @@ type providerMetadataInput struct {
 	LookupKey    string
 	ProviderType string
 	DisplayName  string
+	AuthIndex    string
 }
 
 func providerMetadataUsageIdentities(inputs []providerMetadataInput) []models.UsageIdentity {
@@ -615,9 +625,10 @@ func providerMetadataUsageIdentities(inputs []providerMetadataInput) []models.Us
 			Name:         input.DisplayName,
 			AuthType:     models.UsageIdentityAuthTypeAIProvider,
 			AuthTypeName: "apikey",
-			Identity:     input.LookupKey,
+			Identity:     input.AuthIndex,
 			Type:         input.ProviderType,
 			Provider:     input.DisplayName,
+			LookupKey:    input.LookupKey,
 		})
 	}
 	return identities
@@ -626,27 +637,29 @@ func providerMetadataUsageIdentities(inputs []providerMetadataInput) []models.Us
 func flattenProviderMetadata(cfg cpa.ProviderMetadataConfig) []providerMetadataInput {
 	items := make([]providerMetadataInput, 0)
 	seen := make(map[string]struct{})
-	appendItem := func(lookupKey, providerType, displayName string) {
+	appendItem := func(lookupKey, providerType, displayName, authIndex string) {
 		lookupKey = strings.TrimSpace(lookupKey)
 		providerType = strings.TrimSpace(providerType)
 		displayName = strings.TrimSpace(displayName)
-		if lookupKey == "" || providerType == "" || displayName == "" {
+		authIndex = strings.TrimSpace(authIndex)
+		if lookupKey == "" || providerType == "" || displayName == "" || authIndex == "" {
 			return
 		}
-		if _, ok := seen[lookupKey]; ok {
+		if _, ok := seen[authIndex]; ok {
 			return
 		}
-		seen[lookupKey] = struct{}{}
+		seen[authIndex] = struct{}{}
 		items = append(items, providerMetadataInput{
 			LookupKey:    lookupKey,
 			ProviderType: providerType,
 			DisplayName:  displayName,
+			AuthIndex:    authIndex,
 		})
 	}
 	appendProviderEntries := func(providerType string, configs []cpa.ProviderKeyConfig) {
 		for _, cfg := range configs {
 			displayName := firstNonEmpty(cfg.Name, providerType)
-			appendItem(cfg.APIKey, providerType, displayName)
+			appendItem(cfg.APIKey, providerType, displayName, cfg.AuthIndex)
 		}
 	}
 
@@ -658,7 +671,7 @@ func flattenProviderMetadata(cfg cpa.ProviderMetadataConfig) []providerMetadataI
 	for _, provider := range cfg.OpenAICompatibility {
 		displayName := firstNonEmpty(provider.Name, "openai")
 		for _, entry := range provider.APIKeyEntries {
-			appendItem(entry.APIKey, "openai", displayName)
+			appendItem(entry.APIKey, "openai", displayName, entry.AuthIndex)
 		}
 	}
 

@@ -22,7 +22,7 @@ type AuthConfig struct {
 	LoginPassword string
 	SessionTTL    time.Duration
 	BasePath      string
-	Verifier      func(clientIP string, localClient bool, provided string) (bool, int, string)
+	Verifier      ManagementKeyVerifier
 }
 
 type authHandler struct {
@@ -46,6 +46,8 @@ type loginRequest struct {
 type sessionResponse struct {
 	Authenticated bool `json:"authenticated"`
 }
+
+type ManagementKeyVerifier func(clientIP string, localClient bool, provided string) (allowed bool, statusCode int, message string)
 
 func NewAuthHandler(config AuthConfig, sessions *auth.SessionManager) *authHandler {
 	return &authHandler{config: config, sessions: sessions, now: time.Now, failedAttempts: make(map[string]failedLoginAttempt)}
@@ -114,15 +116,15 @@ func (h *authHandler) login(c *gin.Context) {
 	}
 
 	clientKey := loginClientKey(c)
-	verification := h.verifyPassword(c, request.Password)
-	if h.tooManyFailedAttempts(clientKey) && !verification.matched {
+	passwordMatches, failureStatus, failureMessage := h.authenticateLogin(c, request.Password)
+	if h.tooManyFailedAttempts(clientKey) && !passwordMatches {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many failed login attempts"})
 		return
 	}
 
-	if !verification.matched {
+	if !passwordMatches {
 		h.recordFailedAttempt(clientKey)
-		c.JSON(verification.statusCode, gin.H{"error": verification.message})
+		c.JSON(failureStatus, gin.H{"error": failureMessage})
 		return
 	}
 	h.clearFailedAttempts(clientKey)
@@ -151,39 +153,25 @@ func (h *authHandler) login(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-type passwordVerification struct {
-	matched    bool
-	statusCode int
-	message    string
-}
-
-func (h *authHandler) verifyPassword(c *gin.Context, provided string) passwordVerification {
-	if h == nil {
-		return passwordVerification{statusCode: http.StatusUnauthorized, message: "invalid password"}
-	}
-	if h.config.Verifier == nil {
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(h.config.LoginPassword)) == 1 {
-			return passwordVerification{matched: true}
+func (h *authHandler) authenticateLogin(c *gin.Context, provided string) (bool, int, string) {
+	if h.config.Verifier != nil {
+		clientIP := c.ClientIP()
+		allowed, statusCode, message := h.config.Verifier(clientIP, loginLocalClient(c), provided)
+		if allowed {
+			return true, 0, ""
 		}
-		return passwordVerification{statusCode: http.StatusUnauthorized, message: "invalid password"}
+		if statusCode == 0 {
+			statusCode = http.StatusUnauthorized
+		}
+		if message == "" {
+			message = "invalid password"
+		}
+		return false, statusCode, message
 	}
-	clientIP := loginClientKey(c)
-	allowed, statusCode, message := h.config.Verifier(clientIP, isLoopbackHost(clientIP), provided)
-	if allowed {
-		return passwordVerification{matched: true}
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(h.config.LoginPassword)) == 1 {
+		return true, 0, ""
 	}
-	if statusCode == 0 {
-		statusCode = http.StatusUnauthorized
-	}
-	if message == "" {
-		message = "invalid management key"
-	}
-	return passwordVerification{statusCode: statusCode, message: message}
-}
-
-func isLoopbackHost(host string) bool {
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return false, http.StatusUnauthorized, "invalid password"
 }
 
 func (h *authHandler) logout(c *gin.Context) {
@@ -234,11 +222,12 @@ func (h *authHandler) cleanupFailedAttemptLocked(key string) {
 }
 
 func loginClientKey(c *gin.Context) string {
-	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-	if err == nil && host != "" {
-		return host
-	}
 	return c.ClientIP()
+}
+
+func loginLocalClient(c *gin.Context) bool {
+	ip := net.ParseIP(loginClientKey(c))
+	return ip != nil && ip.IsLoopback()
 }
 
 func clearSessionCookie(c *gin.Context, basePath string) {

@@ -82,20 +82,26 @@ func (m *Module) register(ctx modules.Context) error {
 	m.app = app
 
 	root := ctx.Engine.Group(app.Config.BasePath)
-	root.GET("", m.serveIndex)
+	root.GET("", func(c *gin.Context) {
+		if app.Config.BasePath == "" {
+			m.serveIndex(c)
+			return
+		}
+		c.Redirect(http.StatusMovedPermanently, strings.TrimSuffix(app.Config.BasePath, "/")+"/")
+	})
 	root.GET("/", m.serveIndex)
 	root.GET("/assets/*filepath", m.serveAsset)
 	authHandler := upstreamapi.NewAuthHandler(upstreamapi.AuthConfig{
 		Enabled:    true,
 		SessionTTL: app.Config.SessionTTL,
 		BasePath:   app.Config.BasePath,
-		Verifier:   m.verifier,
+		Verifier:   wrapManagementKeyVerifier(m.verifier),
 	}, app.Sessions)
 	authConfig := upstreamapi.AuthConfig{
 		Enabled:    true,
 		SessionTTL: app.Config.SessionTTL,
 		BasePath:   app.Config.BasePath,
-		Verifier:   m.verifier,
+		Verifier:   wrapManagementKeyVerifier(m.verifier),
 	}
 	upstreamapi.RegisterEmbeddedRoutes(
 		root.Group("/api/v1"),
@@ -184,6 +190,15 @@ func (m *Module) serveAsset(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, contentType(name), data)
+}
+
+func wrapManagementKeyVerifier(verifier adapter.ManagementKeyVerifier) upstreamapi.ManagementKeyVerifier {
+	if verifier == nil {
+		return nil
+	}
+	return func(clientIP string, localClient bool, provided string) (bool, int, string) {
+		return verifier(clientIP, localClient, provided)
+	}
 }
 
 func contentType(name string) string {
