@@ -97,12 +97,22 @@ func NewRouter(
 	usageIdentityProviders ...service.UsageIdentityProvider,
 ) *gin.Engine {
 	router := gin.New()
+	_ = router.SetTrustedProxies(nil)
 	router.Use(gin.Recovery())
 
 	appGroup := router.Group(basePath)
 	registerHealthRoutes(appGroup)
 
-	RegisterEmbeddedRoutes(appGroup.Group("/api/v1"), statusProvider, usageProvider, pricingProvider, authConfig, authHandler, usageIdentityProviders...)
+	apiV1 := appGroup.Group("/api/v1")
+	RegisterEmbeddedRoutes(
+		apiV1,
+		statusProvider,
+		usageProvider,
+		pricingProvider,
+		authConfig,
+		authHandler,
+		usageIdentityProviders...,
+	)
 
 	if staticFS != nil {
 		if indexFile, err := staticFS.Open("index.html"); err == nil {

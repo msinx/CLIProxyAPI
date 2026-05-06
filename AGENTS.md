@@ -40,6 +40,15 @@ go build -o test-output ./cmd/server && rm test-output # Verify compile (REQUIRE
 - `sdk/cliproxy/` — Embeddable SDK entry (service/builder/watchers/pipeline)
 - `test/` — Cross-module integration tests
 
+## Usage Keeper Maintenance
+- `internal/usagekeeper/` is a vendored snapshot of `Willxup/cpa-usage-keeper`; keep provenance and import notes in `internal/usagekeeper/README_UPSTREAM.md`.
+- Do not add `Willxup/cpa-usage-keeper` as a git remote. Use a temporary clone plus the documented import commands when syncing.
+- Keep `/usage` embedded inside CLIProxyAPI. Do not make the usage dashboard depend on Docker or a separate runtime service.
+- Preserve the CLIProxyAPI-specific patches when resyncing upstream: management-key login bridge, `/usage` base path mounting, pure-Go SQLite runtime path, in-process ingestion adapter, non-secret usage identity/source mapping, cancellable maintenance worker, and embedded asset binding.
+- `web/usage-keeper` is the vendored frontend source. `internal/usagekeeper/assets/dist` is the committed release artifact that gets embedded into the binary.
+- If `/usage` or `/usage/assets/*` returns 404, check the app route mount and asset base path/trailing-slash behavior before chasing nginx or release packaging.
+- When updating usage, refresh the recorded upstream commit, rebuild assets, and run the verification commands listed in `internal/usagekeeper/README_UPSTREAM.md` and `docs/usage-keeper.md`.
+
 ## Code Conventions
 - Keep changes small and simple (KISS)
 - Comments in English only

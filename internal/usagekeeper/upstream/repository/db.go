@@ -9,6 +9,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/migration"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -41,7 +42,7 @@ func OpenDatabase(cfg config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
 	}
 
-	if err := runSchemaMigrations(db); err != nil {
+	if err := migration.Run(db); err != nil {
 		return nil, fmt.Errorf("run schema migrations: %w", err)
 	}
 	if err := db.AutoMigrate(models.All()...); err != nil {
@@ -87,8 +88,8 @@ func InsertUsageEvents(db *gorm.DB, events []models.UsageEvent) (int, int, error
 	return inserted, deduped, nil
 }
 
-// CleanupStorage is the daily maintenance entry point: clean Redis inbox rows,
-// then run VACUUM. VACUUM must run after deletes as a separate step.
+// CleanupStorage is the unified repository cleanup entry point for the daily maintenance job:
+// clean the Redis inbox first, then run VACUUM. VACUUM must run separately after deletions.
 func CleanupStorage(db *gorm.DB, now time.Time) (StorageCleanupResult, error) {
 	redisResult, err := CleanupRedisUsageInbox(db, now)
 	if err != nil {

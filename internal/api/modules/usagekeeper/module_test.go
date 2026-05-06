@@ -43,17 +43,20 @@ func TestUsageKeeperModuleMountsPublicShellAndProtectsAPIs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/usage", nil)
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /usage status = %d, want 200; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusMovedPermanently {
+		t.Fatalf("GET /usage status = %d, want 301; body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "CPA USAGE KEEPER") || !strings.Contains(w.Body.String(), `window.__APP_BASE_PATH__ = "/usage"`) {
-		t.Fatalf("GET /usage did not return dashboard shell: %s", w.Body.String())
+	if location := w.Header().Get("Location"); location != "/usage/" {
+		t.Fatalf("GET /usage location = %q, want /usage/", location)
 	}
 	req = httptest.NewRequest(http.MethodGet, "/usage/", nil)
 	w = httptest.NewRecorder()
 	engine.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET /usage/ status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "CPA USAGE KEEPER") || !strings.Contains(w.Body.String(), `window.__APP_BASE_PATH__ = "/usage"`) {
+		t.Fatalf("GET /usage/ did not return dashboard shell: %s", w.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/usage/api/v1/status", nil)
