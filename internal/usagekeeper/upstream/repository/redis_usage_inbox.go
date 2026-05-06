@@ -86,7 +86,7 @@ func MarkRedisUsageInboxProcessFailed(db *gorm.DB, id uint, processErr error) er
 	}).Error
 }
 
-// ListProcessableRedisUsageInbox returns pending and retryable rows.
+// ListProcessableRedisUsageInbox 返回待处理和可重试的数据，不返回已解码失败或已丢弃的数据。
 func ListProcessableRedisUsageInbox(db *gorm.DB, limit int) ([]models.RedisUsageInbox, error) {
 	query := db.Where("status = ? OR status = ?", RedisUsageInboxStatusPending, RedisUsageInboxStatusProcessFailed).Order("id asc")
 	if limit > 0 {
@@ -111,8 +111,8 @@ func ListPendingRedisUsageInbox(db *gorm.DB, limit int) ([]models.RedisUsageInbo
 	return rows, nil
 }
 
-// CleanupRedisUsageInbox removes completed and failed raw inbox messages.
-// Pending data is never deleted here.
+// CleanupRedisUsageInbox 清理已完成和失败的 Redis inbox 原始消息，pending 数据永远不在这里删除。
+// processed 保留到下一个本地日开始后才清理；decode_failed/process_failed/discarded 保留 7 天便于排查。
 func CleanupRedisUsageInbox(db *gorm.DB, now time.Time) (RedisUsageInboxCleanupResult, error) {
 	localNow := now.In(time.Local)
 	localDayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)

@@ -32,53 +32,57 @@ var (
 )
 
 type Config struct {
-	// AppPort is the web server listen port.
+	// AppPort 是 Web 服务监听端口。
 	AppPort string
-	// AppBasePath is the web deployment subpath. Empty means root.
+	// AppBasePath 是 Web 服务部署子路径，空值表示根路径。
 	AppBasePath string
-	// CPABaseURL is the CPA service base URL.
+	// CPABaseURL 是 CPA 服务基础地址。
 	CPABaseURL string
-	// CPAManagementKey authenticates access to CPA management data.
+	// CPAManagementKey 是访问 CPA 管理数据的密钥。
 	CPAManagementKey string
-	// RedisQueueAddr is the CPA management data stream TCP address. Empty derives from CPA_BASE_URL.
+	// RedisQueueAddr 是 CPA management data stream 的 TCP 地址，空值时按 CPA_BASE_URL 推导。
 	RedisQueueAddr string
-	// RedisQueueKey is the CPA usage queue name.
+	// RedisQueueTLS 控制是否使用 TLS 连接 Redis 队列。
+	RedisQueueTLS bool
+	// RedisQueueKey 是 CPA usage 队列名。
 	RedisQueueKey string
-	// RedisQueueBatchSize is the maximum Redis LPOP batch size.
+	// RedisQueueBatchSize 是单次 Redis LPOP 最多拉取的消息数。
 	RedisQueueBatchSize int
-	// RedisQueueIdleInterval is the next check interval when the Redis queue is empty.
+	// RedisQueueIdleInterval 是 Redis 队列为空时的下一次检查间隔。
 	RedisQueueIdleInterval time.Duration
-	// RedisQueueErrorBackoff is the fixed backoff after a transient Redis error.
+	// RedisQueueErrorBackoff 是 Redis 临时错误后的固定退避间隔。
 	RedisQueueErrorBackoff time.Duration
-	// MetadataSyncInterval is the fixed refresh interval for auth files and provider metadata.
+	// MetadataSyncInterval 是 auth files 和 provider metadata 的固定刷新间隔。
 	MetadataSyncInterval time.Duration
-	// WorkDir is the app working directory. Database, logs, and backups derive from it by default.
+	// WorkDir 是应用工作目录，数据库、日志和备份默认从这里派生。
 	WorkDir string
-	// SQLitePath is the SQLite database file path.
+	// SQLitePath 是 SQLite 数据库文件路径。
 	SQLitePath string
-	// BackupEnabled controls whether SQLite database backups are written.
+	// BackupEnabled 控制是否保存 SQLite 数据库备份文件。
 	BackupEnabled bool
-	// BackupDir is the SQLite database backup directory.
+	// BackupDir 是 SQLite 数据库备份目录。
 	BackupDir string
-	// BackupInterval is the minimum interval between backup writes.
+	// BackupInterval 是两次备份写入之间的最小间隔。
 	BackupInterval time.Duration
-	// BackupRetentionDays is the backup retention period in days.
+	// BackupRetentionDays 是备份文件保留天数。
 	BackupRetentionDays int
-	// RequestTimeout is the timeout for CPA HTTP and Redis TCP access.
+	// RequestTimeout 是访问 CPA HTTP 和 Redis TCP 的超时时间。
 	RequestTimeout time.Duration
-	// LogLevel is the application log level.
+	// TLSSkipVerify 控制是否跳过 CPA HTTPS 和 Redis 队列 TLS 的证书验证。
+	TLSSkipVerify bool
+	// LogLevel 是应用日志级别。
 	LogLevel string
-	// LogFileEnabled controls whether persistent log files are written.
+	// LogFileEnabled 控制是否写入持久化日志文件。
 	LogFileEnabled bool
-	// LogDir is the application log directory.
+	// LogDir 是应用日志文件目录。
 	LogDir string
-	// LogRetentionDays is the log retention period in days. Zero disables automatic cleanup.
+	// LogRetentionDays 是日志保留天数，0 表示不自动清理。
 	LogRetentionDays int
-	// AuthEnabled controls whether login protection is enabled.
+	// AuthEnabled 控制是否启用登录保护。
 	AuthEnabled bool
-	// LoginPassword is the password used when login protection is enabled.
+	// LoginPassword 是启用登录保护时使用的登录密码。
 	LoginPassword string
-	// AuthSessionTTL is the login session TTL.
+	// AuthSessionTTL 是登录 session 有效时长。
 	AuthSessionTTL time.Duration
 }
 
@@ -174,6 +178,16 @@ func Load(options LoadOptions) (*Config, error) {
 		return nil, err
 	}
 
+	tlsSkipVerify, err := getBool("TLS_SKIP_VERIFY", false)
+	if err != nil {
+		return nil, err
+	}
+
+	redisQueueTLS, err := getBool("REDIS_QUEUE_TLS", false)
+	if err != nil {
+		return nil, err
+	}
+
 	appBasePath, err := normalizeBasePath(strings.TrimSpace(os.Getenv("APP_BASE_PATH")))
 	if err != nil {
 		return nil, fmt.Errorf("APP_BASE_PATH is invalid: %w", err)
@@ -187,6 +201,7 @@ func Load(options LoadOptions) (*Config, error) {
 		CPABaseURL:             strings.TrimSpace(os.Getenv("CPA_BASE_URL")),
 		CPAManagementKey:       strings.TrimSpace(os.Getenv("CPA_MANAGEMENT_KEY")),
 		RedisQueueAddr:         strings.TrimSpace(os.Getenv("REDIS_QUEUE_ADDR")),
+		RedisQueueTLS:          redisQueueTLS,
 		RedisQueueKey:          RedisQueueKeyDefault,
 		RedisQueueBatchSize:    redisQueueBatchSize,
 		RedisQueueIdleInterval: redisQueueIdleInterval,
@@ -199,6 +214,7 @@ func Load(options LoadOptions) (*Config, error) {
 		BackupInterval:         backupInterval,
 		BackupRetentionDays:    backupRetentionDays,
 		RequestTimeout:         requestTimeout,
+		TLSSkipVerify:          tlsSkipVerify,
 		LogLevel:               getString("LOG_LEVEL", "info"),
 		LogFileEnabled:         logFileEnabled,
 		LogDir:                 filepath.Join(workDir, workDirLogsName),

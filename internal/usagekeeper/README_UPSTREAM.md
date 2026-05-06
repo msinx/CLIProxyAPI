@@ -2,7 +2,7 @@
 
 Upstream repository: https://github.com/Willxup/cpa-usage-keeper
 Imported branch: main
-Imported backend/frontend snapshot commit: aec8eebd0a6f1b15b6f1ce19905cc9b0286a669b
+Imported backend/frontend snapshot commit: 5808976c06c0ce5c1d72377750be7baabb05b00a
 
 ## Purpose
 
