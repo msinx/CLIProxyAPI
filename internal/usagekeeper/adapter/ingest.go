@@ -12,9 +12,9 @@ import (
 	"time"
 
 	internallogging "github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
+	repodto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -115,12 +115,12 @@ func (p *Plugin) HandleUsage(ctx context.Context, record coreusage.Record) {
 	defer store.wg.Done()
 
 	event := buildUsageEvent(ctx, record)
-	if _, _, err := repository.InsertUsageEvents(store.db, []models.UsageEvent{event}); err != nil {
+	if _, _, err := repository.InsertUsageEvents(store.db, []entities.UsageEvent{event}); err != nil {
 		log.WithError(err).Warn("usage keeper ingest failed")
 	}
 }
 
-func buildUsageEvent(ctx context.Context, record coreusage.Record) models.UsageEvent {
+func buildUsageEvent(ctx context.Context, record coreusage.Record) entities.UsageEvent {
 	timestamp := record.RequestedAt
 	if timestamp.IsZero() {
 		timestamp = time.Now()
@@ -132,6 +132,9 @@ func buildUsageEvent(ctx context.Context, record coreusage.Record) models.UsageE
 	model := firstNonEmpty(record.Model, "unknown")
 	authIndex := strings.TrimSpace(record.AuthIndex)
 	authType := usageAuthType(record, authIndex)
+	if authType == "apikey" && authIndex == "" {
+		authIndex = stableAPIKeyAuthIndex(record)
+	}
 	source := stableUsageSource(record, authType)
 	latencyMS := record.Latency.Milliseconds()
 	if latencyMS < 0 {
@@ -144,7 +147,7 @@ func buildUsageEvent(ctx context.Context, record coreusage.Record) models.UsageE
 	apiGroupKey := stableGroupKey(record)
 	requestID := runtimeRequestID(ctx)
 
-	return models.UsageEvent{
+	return entities.UsageEvent{
 		EventKey:        buildRuntimeEventKey(requestID, provider, model, authIndex, timestamp, latencyMS, failed, tokens),
 		APIGroupKey:     apiGroupKey,
 		Provider:        provider,
@@ -165,8 +168,8 @@ func buildUsageEvent(ctx context.Context, record coreusage.Record) models.UsageE
 	}
 }
 
-func normalizeTokens(detail coreusage.Detail) cpa.TokenStats {
-	tokens := cpa.TokenStats{
+func normalizeTokens(detail coreusage.Detail) repodto.TokenStats {
+	tokens := repodto.TokenStats{
 		InputTokens:     detail.InputTokens,
 		OutputTokens:    detail.OutputTokens,
 		ReasoningTokens: detail.ReasoningTokens,
@@ -206,6 +209,14 @@ func stableUsageSource(record coreusage.Record, authType string) string {
 		return "auth-id:" + authID
 	}
 	return ""
+}
+
+func stableAPIKeyAuthIndex(record coreusage.Record) string {
+	rawKey := strings.TrimSpace(record.APIKey)
+	if rawKey == "" {
+		return strings.TrimSpace(record.Source)
+	}
+	return stableProviderLookupKey(record.Provider, "", rawKey)
 }
 
 func usageAuthType(record coreusage.Record, authIndex string) string {
@@ -248,7 +259,7 @@ func runtimeRequestID(ctx context.Context) string {
 	return requestID
 }
 
-func buildRuntimeEventKey(requestID, provider, model, authIndex string, timestamp time.Time, latencyMS int64, failed bool, tokens cpa.TokenStats) string {
+func buildRuntimeEventKey(requestID, provider, model, authIndex string, timestamp time.Time, latencyMS int64, failed bool, tokens repodto.TokenStats) string {
 	payload := strings.Join([]string{
 		requestID,
 		provider,

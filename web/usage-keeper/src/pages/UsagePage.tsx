@@ -14,9 +14,8 @@ import {
   Legend,
   Filler
 } from 'chart.js';
-import { ApiError, fetchStatus, fetchUsageAnalysis, fetchUsageEventFilterOptions, fetchUsageEvents, fetchUsageIdentities } from '@/lib/api';
+import { ApiError, fetchStatus, fetchUpdateCheck, fetchUsageAnalysis, fetchUsageEventModelFilterOptions, fetchUsageEventSourceFilterOptions, fetchUsageEvents, fetchUsageIdentities } from '@/lib/api';
 import type { StatusResponse, UsageAnalysisResponse, UsageEvent, UsageIdentity, UsageSourceFilterOption } from '@/lib/types';
-import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Select } from '@/components/ui/Select';
 import { IconRefreshCw } from '@/components/ui/icons';
@@ -112,6 +111,10 @@ const ALL_REQUEST_EVENTS_FILTER = '__all__';
 const OVERVIEW_AUTO_REFRESH_INTERVAL_MS = 10_000;
 
 export const shouldShowRangeControls = (tab: UsageTab) => tab !== 'pricing' && tab !== 'credentials';
+
+export const shouldShowUpdateCheckButton = (status: Pick<StatusResponse, 'updateCheckEnabled'> | null) => status?.updateCheckEnabled === true;
+
+export const getUpdateCheckToastDuration = (kind: 'success' | 'info' | 'error') => (kind === 'error' ? 6_000 : 4_000);
 
 type RequestEventFilterState = {
   model: string;
@@ -388,10 +391,10 @@ const toTimestampMs = (value: string | undefined): number | undefined => {
 };
 
 export const getOverviewChartEndMs = ({ timeRange, filterWindow, fallbackEndMs, resolvedRangeEndMs }: { timeRange: UsageTimeRange; filterWindow: UsageFilterWindow; fallbackEndMs: number; resolvedRangeEndMs?: number }) => {
-  if (resolvedRangeEndMs !== undefined) return resolvedRangeEndMs;
   if (timeRange === 'today' && filterWindow.startMs !== undefined) {
-    return filterWindow.startMs + 24 * 60 * 60 * 1000 - 1;
+    return filterWindow.startMs + 24 * 60 * 60 * 1000;
   }
+  if (resolvedRangeEndMs !== undefined) return resolvedRangeEndMs;
   return filterWindow.endMs ?? fallbackEndMs;
 };
 
@@ -447,6 +450,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
   });
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [statusError, setStatusError] = useState('');
+  const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
+  const [updateCheckNotice, setUpdateCheckNotice] = useState<{ kind: 'success' | 'info' | 'error'; message: string } | null>(null);
+  const [hasNewVersion, setHasNewVersion] = useState(false);
+  const updateCheckNoticeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const updateCheckEnabled = status?.updateCheckEnabled;
   const [customRangeError, setCustomRangeError] = useState('');
   const [customRangeHint, setCustomRangeHint] = useState('');
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -484,6 +492,11 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
       })),
     [t]
   );
+  const updateCheckToastClassName = updateCheckNotice ? (() => {
+    if (updateCheckNotice.kind === 'error') return styles.updateCheckToastError;
+    if (updateCheckNotice.kind === 'success') return styles.updateCheckToastSuccess;
+    return styles.updateCheckToastInfo;
+  })() : '';
 
   const resolvedRangeStartMs = toTimestampMs(usage?.range_start);
   const resolvedRangeEndMs = toTimestampMs(usage?.range_end);
@@ -586,6 +599,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     fallbackEndMs: lastRefreshedAt?.getTime() ?? Date.now(),
     resolvedRangeEndMs,
   });
+  const includeFinalHourBucket = timeRange === 'today';
   const preferredOverviewChartPeriod = getPreferredOverviewChartPeriod({
     windowMinutes: filterWindow.windowMinutes,
   });
@@ -678,6 +692,19 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     };
   }, [onAuthRequired]);
 
+  useEffect(() => {
+    if (!updateCheckEnabled) {
+      setHasNewVersion(false);
+    }
+  }, [updateCheckEnabled]);
+
+  useEffect(() => () => {
+    if (updateCheckNoticeTimerRef.current !== null) {
+      window.clearTimeout(updateCheckNoticeTimerRef.current);
+      updateCheckNoticeTimerRef.current = null;
+    }
+  }, []);
+
   const getEventQueryWindow = useCallback(() => {
     if (timeRange !== 'custom') {
       return { valid: true, start: undefined, end: undefined };
@@ -699,12 +726,15 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     eventsFilterOptionsRequestControllerRef.current = controller;
 
     try {
-      const response = await fetchUsageEventFilterOptions(controller.signal);
+      const [modelResponse, sourceResponse] = await Promise.all([
+        fetchUsageEventModelFilterOptions(controller.signal),
+        fetchUsageEventSourceFilterOptions(controller.signal),
+      ]);
       if (eventsFilterOptionsRequestControllerRef.current !== controller) {
         return;
       }
-      setEventsModelOptions(response.models ?? []);
-      setEventsSourceOptions(response.sources ?? []);
+      setEventsModelOptions(modelResponse.models ?? []);
+      setEventsSourceOptions(sourceResponse.sources ?? []);
     } catch (error) {
       if (controller.signal.aborted) {
         return;
@@ -876,6 +906,45 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     }
   }, [onAuthRequired, refreshActiveTab, t]);
 
+  const showUpdateCheckNotice = useCallback((kind: 'success' | 'info' | 'error', message: string) => {
+    if (updateCheckNoticeTimerRef.current !== null) {
+      window.clearTimeout(updateCheckNoticeTimerRef.current);
+    }
+    setUpdateCheckNotice({ kind, message });
+    updateCheckNoticeTimerRef.current = window.setTimeout(() => {
+      setUpdateCheckNotice(null);
+      updateCheckNoticeTimerRef.current = null;
+    }, getUpdateCheckToastDuration(kind));
+  }, []);
+
+  const handleUpdateCheck = useCallback(async () => {
+    setUpdateCheckLoading(true);
+    try {
+      const result = await fetchUpdateCheck();
+      if (!result.canCompare) {
+        setHasNewVersion(false);
+        showUpdateCheckNotice('info', t('usage_stats.update_check_dev_build'));
+        return;
+      }
+      if (result.updateAvailable) {
+        setHasNewVersion(true);
+        showUpdateCheckNotice('success', t('usage_stats.update_check_new_version', { version: result.latestVersion }));
+        return;
+      }
+      setHasNewVersion(false);
+      showUpdateCheckNotice('info', t('usage_stats.update_check_latest'));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        onAuthRequired?.();
+        return;
+      }
+      setHasNewVersion(false);
+      showUpdateCheckNotice('error', t('usage_stats.update_check_failed'));
+    } finally {
+      setUpdateCheckLoading(false);
+    }
+  }, [onAuthRequired, showUpdateCheckNotice, t]);
+
   useEffect(() => scheduleOverviewAutoRefresh({
     enabled: isOverviewTab,
     refreshOverview: loadUsage,
@@ -993,6 +1062,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
     isMobile,
     hourWindowHours,
     endMs: filterWindowEndMs,
+    includeFinalHourBucket,
     preferredPeriod: preferredOverviewChartPeriod,
   });
 
@@ -1109,6 +1179,30 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 );
               })}
             </div>
+            {shouldShowUpdateCheckButton(status) && (
+              <div className={styles.updateCheckSwitcher} role="group" aria-label={t('usage_stats.check_updates')}>
+                <button
+                  type="button"
+                  className={`${styles.updateCheckPill} ${styles.updateCheckPillActive} ${updateCheckLoading ? styles.updateCheckPillLoading : ''}`.trim()}
+                  onClick={() => void handleUpdateCheck()}
+                  disabled={updateCheckLoading}
+                  aria-busy={updateCheckLoading}
+                  aria-pressed={hasNewVersion}
+                >
+                  {updateCheckLoading ? (
+                    <span className={styles.updateCheckPillInner}>
+                      <LoadingSpinner size={12} className={styles.updateCheckSpinner} />
+                      <span>{t('common.loading')}</span>
+                    </span>
+                  ) : (
+                    <span className={styles.updateCheckPillInner}>
+                      <span>{t('usage_stats.check_updates')}</span>
+                      {hasNewVersion && <span className={styles.updateCheckDot} aria-hidden="true" />}
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -1128,6 +1222,29 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 <span className={styles.lastRefreshed}>
                   {t('usage_stats.last_updated')}: {lastSyncAt.toLocaleTimeString()}
                 </span>
+              </div>
+            )}
+
+            {updateCheckNotice && (
+              <div
+                className={`${styles.updateCheckToast} ${updateCheckToastClassName}`.trim()}
+                role="status"
+                aria-live="polite"
+              >
+                <span className={styles.updateCheckToastMessage}>{updateCheckNotice.message}</span>
+                <button
+                  type="button"
+                  className={styles.updateCheckToastClose}
+                  onClick={() => {
+                    if (updateCheckNoticeTimerRef.current !== null) {
+                      window.clearTimeout(updateCheckNoticeTimerRef.current);
+                      updateCheckNoticeTimerRef.current = null;
+                    }
+                    setUpdateCheckNotice(null);
+                  }}
+                >
+                  {t('usage_stats.dismiss_notice')}
+                </button>
               </div>
             )}
 
@@ -1209,17 +1326,27 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                 {showRangeControls && isCustomRange && customRangeError && (
                   <span className={styles.customRangeError}>{customRangeError}</span>
                 )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleManualRefresh().catch(() => {})}
-                  loading={manualRefreshLoading}
-                  disabled={manualRefreshLoading}
-                  className={styles.refreshButton}
-                >
-                  <IconRefreshCw size={14} />
-                  <span>{manualRefreshLoading ? t('common.loading') : t('usage_stats.refresh')}</span>
-                </Button>
+                <div className={styles.refreshSwitcher} role="group" aria-label={t('usage_stats.refresh')}>
+                  <button
+                    type="button"
+                    className={`${styles.refreshPill} ${styles.refreshPillActive} ${manualRefreshLoading ? styles.refreshPillLoading : ''}`.trim()}
+                    onClick={() => void handleManualRefresh().catch(() => {})}
+                    disabled={manualRefreshLoading}
+                    aria-busy={manualRefreshLoading}
+                  >
+                    {manualRefreshLoading ? (
+                      <span className={styles.refreshPillInner}>
+                        <LoadingSpinner size={12} className={styles.refreshSpinner} />
+                        <span>{t('common.loading')}</span>
+                      </span>
+                    ) : (
+                      <span className={styles.refreshPillInner}>
+                        <IconRefreshCw size={14} />
+                        <span>{t('usage_stats.refresh')}</span>
+                      </span>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1280,6 +1407,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   isMobile={isMobile}
                   hourWindowHours={hourWindowHours}
                   endMs={filterWindowEndMs}
+                  includeFinalHourBucket={includeFinalHourBucket}
                   preferredPeriod={preferredOverviewChartPeriod}
                 />
 
@@ -1290,6 +1418,7 @@ export function UsagePage({ onAuthRequired }: { onAuthRequired?: () => void }) {
                   isMobile={isMobile}
                   hourWindowHours={hourWindowHours}
                   endMs={filterWindowEndMs}
+                  includeFinalHourBucket={includeFinalHourBucket}
                   preferredPeriod={preferredOverviewChartPeriod}
                 />
               </>

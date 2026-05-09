@@ -2,16 +2,19 @@ package api
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
 )
 
+// loadUsageResolutionData 为 Request Events 和 Credentials 加载 source 解析所需的活跃 usage identities。
 func loadUsageResolutionData(
 	c *gin.Context,
 	usageIdentityProvider service.UsageIdentityProvider,
-) ([]models.UsageIdentity, error) {
+) ([]entities.UsageIdentity, error) {
 	if usageIdentityProvider == nil {
-		return []models.UsageIdentity{}, nil
+		return []entities.UsageIdentity{}, nil
 	}
-	return usageIdentityProvider.ListUsageIdentities(c.Request.Context())
+
+	// Request Events 的 Source 下拉和 Credentials 的展示解析只需要活跃身份，直接调用 SQL 层 active-only 查询。
+	return usageIdentityProvider.ListActiveUsageIdentities(c.Request.Context())
 }

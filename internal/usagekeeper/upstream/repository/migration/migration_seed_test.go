@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"gorm.io/gorm"
 )
 
@@ -76,21 +76,21 @@ func seedAIProviderAuthIndexMigrationDatabase(t *testing.T, dbPath string) {
 	now := time.Date(2026, 5, 5, 7, 0, 0, 0, time.UTC)
 	identityRows := []struct {
 		name         string
-		authType     models.UsageIdentityAuthType
+		authType     entities.UsageIdentityAuthType
 		authTypeName string
 		identity     string
 		typeName     string
 		provider     string
 		totalTokens  int64
 	}{
-		{name: "Claude", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-claude-old", typeName: "claude", provider: "Claude", totalTokens: 999},
-		{name: "Gemini", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-duplicate", typeName: "gemini", provider: "Gemini", totalTokens: 888},
-		{name: "", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "authidx-existing", typeName: "", provider: "", totalTokens: 777},
-		{name: "Free", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-ambiguous", typeName: "openai", provider: "Free", totalTokens: 666},
-		{name: "Claude", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-provider-mismatch", typeName: "claude", provider: "Claude", totalTokens: 555},
-		{name: "Claude", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-no-events", typeName: "claude", provider: "Claude", totalTokens: 444},
-		{name: "OAuth User", authType: models.UsageIdentityAuthTypeAuthFile, authTypeName: "oauth", identity: "auth-file-index", typeName: "claude", provider: "Claude", totalTokens: 333},
-		{name: "Non API Key", authType: models.UsageIdentityAuthTypeAIProvider, authTypeName: "oauth", identity: "non-apikey-identity", typeName: "claude", provider: "Claude", totalTokens: 222},
+		{name: "Claude", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-claude-old", typeName: "claude", provider: "Claude", totalTokens: 999},
+		{name: "Gemini", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-duplicate", typeName: "gemini", provider: "Gemini", totalTokens: 888},
+		{name: "", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "authidx-existing", typeName: "", provider: "", totalTokens: 777},
+		{name: "Free", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-ambiguous", typeName: "openai", provider: "Free", totalTokens: 666},
+		{name: "Claude", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-provider-mismatch", typeName: "claude", provider: "Claude", totalTokens: 555},
+		{name: "Claude", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "apikey", identity: "sk-no-events", typeName: "claude", provider: "Claude", totalTokens: 444},
+		{name: "OAuth User", authType: entities.UsageIdentityAuthTypeAuthFile, authTypeName: "oauth", identity: "auth-file-index", typeName: "claude", provider: "Claude", totalTokens: 333},
+		{name: "Non API Key", authType: entities.UsageIdentityAuthTypeAIProvider, authTypeName: "oauth", identity: "non-apikey-identity", typeName: "claude", provider: "Claude", totalTokens: 222},
 	}
 	for _, row := range identityRows {
 		if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider, total_requests, success_count, total_tokens, last_aggregated_usage_event_id, created_at, updated_at)
@@ -192,16 +192,16 @@ func seedPrefixGeneratedUsageIdentities(t *testing.T, dbPath string) {
 	}
 
 	now := time.Date(2026, 5, 4, 8, 0, 0, 0, time.UTC)
-	rows := []models.UsageIdentity{
-		{Name: "Claude Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-key", Type: "claude", Provider: "Claude Team", TotalRequests: 1, SuccessCount: 1, TotalTokens: 30, LastAggregatedUsageEventID: 1, CreatedAt: now, UpdatedAt: now},
-		{Name: "Claude Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-unused-key", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Gemini Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini", Type: "gemini", Provider: "Gemini Team", TotalRequests: 2, SuccessCount: 2, TotalTokens: 40, LastAggregatedUsageEventID: 2, CreatedAt: now, UpdatedAt: now},
-		{Name: "Claude Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Codex Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "codex", Type: "codex", Provider: "Codex Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Vertex Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "vertex", Type: "vertex", Provider: "Vertex Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "OpenAI Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "openai", Type: "openai", Provider: "OpenAI Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Gemini Team", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini-unused-key", Type: "gemini", Provider: "Gemini Team", CreatedAt: now, UpdatedAt: now},
-		{Name: "Custom OpenAI", AuthType: models.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "https://proxy.internal/v1", Type: "openai", Provider: "Custom OpenAI", CreatedAt: now, UpdatedAt: now},
+	rows := []entities.UsageIdentity{
+		{Name: "Claude Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-key", Type: "claude", Provider: "Claude Team", TotalRequests: 1, SuccessCount: 1, TotalTokens: 30, LastAggregatedUsageEventID: 1, CreatedAt: now, UpdatedAt: now},
+		{Name: "Claude Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude-unused-key", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Gemini Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini", Type: "gemini", Provider: "Gemini Team", TotalRequests: 2, SuccessCount: 2, TotalTokens: 40, LastAggregatedUsageEventID: 2, CreatedAt: now, UpdatedAt: now},
+		{Name: "Claude Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "claude", Type: "claude", Provider: "Claude Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Codex Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "codex", Type: "codex", Provider: "Codex Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Vertex Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "vertex", Type: "vertex", Provider: "Vertex Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "OpenAI Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "openai", Type: "openai", Provider: "OpenAI Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Gemini Team", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "gemini-unused-key", Type: "gemini", Provider: "Gemini Team", CreatedAt: now, UpdatedAt: now},
+		{Name: "Custom OpenAI", AuthType: entities.UsageIdentityAuthTypeAIProvider, AuthTypeName: "apikey", Identity: "https://proxy.internal/v1", Type: "openai", Provider: "Custom OpenAI", CreatedAt: now, UpdatedAt: now},
 	}
 	for _, row := range rows {
 		if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider, total_requests, success_count, total_tokens, last_aggregated_usage_event_id, created_at, updated_at)
@@ -316,6 +316,101 @@ func seedLegacyUsageIdentityTables(t *testing.T, dbPath string) {
 			event.eventKey, "group", "claude", "/v1/messages", event.authType, event.eventKey, "claude-sonnet", event.timestamp, event.source, event.authIndex, event.failed, 100, event.inputTokens, event.outputTokens, event.reasoningTokens, event.cachedTokens, event.totalTokens, event.timestamp,
 		).Error; err != nil {
 			t.Fatalf("seed usage event %s: %v", event.eventKey, err)
+		}
+	}
+}
+
+func seedPerformanceIndexMigrationDatabase(t *testing.T, dbPath string) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(dbPath)), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open performance index migration database: %v", err)
+	}
+	defer closeOpenedDatabase(t, db)
+
+	statements := []string{
+		`CREATE TABLE usage_events (
+			id integer PRIMARY KEY AUTOINCREMENT,
+			event_key text,
+			api_group_key text,
+			provider text,
+			endpoint text,
+			auth_type text,
+			request_id text,
+			model text,
+			timestamp datetime,
+			source text,
+			auth_index text,
+			failed numeric,
+			latency_ms integer,
+			input_tokens integer,
+			output_tokens integer,
+			reasoning_tokens integer,
+			cached_tokens integer,
+			total_tokens integer,
+			created_at datetime
+		)`,
+		`CREATE UNIQUE INDEX uniq_usage_events_event_key ON usage_events(event_key)`,
+		`CREATE INDEX idx_usage_events_timestamp ON usage_events(timestamp)`,
+		`CREATE INDEX idx_usage_events_api_group_key ON usage_events(api_group_key)`,
+		`CREATE INDEX idx_usage_events_source ON usage_events(source)`,
+		`CREATE INDEX idx_usage_events_auth_index ON usage_events(auth_index)`,
+		`CREATE TABLE redis_usage_inboxes (
+			id integer PRIMARY KEY AUTOINCREMENT,
+			queue_key text NOT NULL,
+			message_hash text NOT NULL,
+			raw_message text NOT NULL,
+			status text NOT NULL,
+			attempt_count integer NOT NULL DEFAULT 0,
+			last_error text,
+			usage_event_key text,
+			popped_at datetime NOT NULL,
+			processed_at datetime,
+			created_at datetime,
+			updated_at datetime
+		)`,
+		`CREATE INDEX idx_redis_usage_inboxes_status ON redis_usage_inboxes(status)`,
+		`CREATE INDEX idx_redis_usage_inboxes_queue_key ON redis_usage_inboxes(queue_key)`,
+		`CREATE INDEX idx_redis_usage_inboxes_message_hash ON redis_usage_inboxes(message_hash)`,
+		`CREATE INDEX idx_redis_usage_inboxes_usage_event_key ON redis_usage_inboxes(usage_event_key)`,
+		`CREATE INDEX idx_redis_usage_inboxes_popped_at ON redis_usage_inboxes(popped_at)`,
+		`CREATE TABLE usage_identities (
+			id integer PRIMARY KEY AUTOINCREMENT,
+			name text,
+			auth_type integer,
+			auth_type_name text,
+			identity text,
+			type text,
+			provider text,
+			lookup_key text,
+			total_requests integer DEFAULT 0,
+			success_count integer DEFAULT 0,
+			failure_count integer DEFAULT 0,
+			input_tokens integer DEFAULT 0,
+			output_tokens integer DEFAULT 0,
+			reasoning_tokens integer DEFAULT 0,
+			cached_tokens integer DEFAULT 0,
+			total_tokens integer DEFAULT 0,
+			last_aggregated_usage_event_id integer DEFAULT 0,
+			first_used_at datetime,
+			last_used_at datetime,
+			stats_updated_at datetime,
+			is_deleted numeric DEFAULT false,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at datetime
+		)`,
+		`CREATE UNIQUE INDEX uniq_usage_identities_type_identity ON usage_identities(auth_type, identity)`,
+		`CREATE INDEX idx_usage_identities_auth_type ON usage_identities(auth_type)`,
+		`CREATE INDEX idx_usage_identities_auth_type_name ON usage_identities(auth_type_name)`,
+		`CREATE INDEX idx_usage_identities_identity ON usage_identities(identity)`,
+		`CREATE INDEX idx_usage_identities_is_deleted ON usage_identities(is_deleted)`,
+		`CREATE INDEX idx_usage_identities_last_aggregated_usage_event_id ON usage_identities(last_aggregated_usage_event_id)`,
+		`CREATE INDEX idx_usage_identities_deleted_at ON usage_identities(deleted_at)`,
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("seed performance index schema with %q: %v", statement, err)
 		}
 	}
 }

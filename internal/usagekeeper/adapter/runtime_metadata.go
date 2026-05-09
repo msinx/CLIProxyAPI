@@ -9,7 +9,7 @@ import (
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	"gorm.io/gorm"
@@ -28,19 +28,19 @@ func (s RuntimeMetadataSource) RefreshUsageKeeperMetadata(ctx context.Context, d
 		ctx = context.Background()
 	}
 	now := time.Now().UTC()
-	if err := repository.ReplaceUsageIdentitiesForAuthType(ctx, db, s.authUsageIdentities(), models.UsageIdentityAuthTypeAuthFile, now); err != nil {
+	if err := repository.ReplaceUsageIdentitiesForAuthType(ctx, db, s.authUsageIdentities(), entities.UsageIdentityAuthTypeAuthFile, now); err != nil {
 		return err
 	}
 	identities, providerTypes := s.providerUsageIdentities()
 	return repository.ReplaceUsageIdentitiesForProviderTypes(ctx, db, identities, providerTypes, now)
 }
 
-func (s RuntimeMetadataSource) authUsageIdentities() []models.UsageIdentity {
+func (s RuntimeMetadataSource) authUsageIdentities() []entities.UsageIdentity {
 	if s.AuthManager == nil {
 		return nil
 	}
 	auths := s.AuthManager.List()
-	identities := make([]models.UsageIdentity, 0, len(auths))
+	identities := make([]entities.UsageIdentity, 0, len(auths))
 	for _, auth := range auths {
 		if auth == nil {
 			continue
@@ -50,9 +50,9 @@ func (s RuntimeMetadataSource) authUsageIdentities() []models.UsageIdentity {
 			authIndex = auth.ID
 		}
 		accountType, account := auth.AccountInfo()
-		identities = append(identities, models.UsageIdentity{
+		identities = append(identities, entities.UsageIdentity{
 			Name:         firstRuntimeString(emailFromAuthAccount(accountType, account), auth.Label, auth.FileName, auth.ID, authIndex),
-			AuthType:     models.UsageIdentityAuthTypeAuthFile,
+			AuthType:     entities.UsageIdentityAuthTypeAuthFile,
 			AuthTypeName: "oauth",
 			Identity:     authIndex,
 			Type:         firstRuntimeString(accountType, auth.Provider),
@@ -62,7 +62,7 @@ func (s RuntimeMetadataSource) authUsageIdentities() []models.UsageIdentity {
 	return identities
 }
 
-func (s RuntimeMetadataSource) providerUsageIdentities() ([]models.UsageIdentity, []string) {
+func (s RuntimeMetadataSource) providerUsageIdentities() ([]entities.UsageIdentity, []string) {
 	inputs := s.providerUsageIdentitiesFromAuthManager()
 	if len(inputs) > 0 {
 		return inputs, providerTypesFromIdentities(inputs)
@@ -70,7 +70,7 @@ func (s RuntimeMetadataSource) providerUsageIdentities() ([]models.UsageIdentity
 	if s.Config == nil {
 		return nil, nil
 	}
-	inputs = make([]models.UsageIdentity, 0)
+	inputs = make([]entities.UsageIdentity, 0)
 	inputs = appendProviderKeyIdentity(inputs, "gemini", s.Config.GeminiKey, func(item config.GeminiKey) (string, string, string) {
 		return item.APIKey, item.Prefix, item.BaseURL
 	})
@@ -94,9 +94,9 @@ func (s RuntimeMetadataSource) providerUsageIdentities() ([]models.UsageIdentity
 				continue
 			}
 			lookupKey := stableProviderLookupKey("openai-compatible", "", key)
-			inputs = append(inputs, models.UsageIdentity{
+			inputs = append(inputs, entities.UsageIdentity{
 				Name:         displayName,
-				AuthType:     models.UsageIdentityAuthTypeAIProvider,
+				AuthType:     entities.UsageIdentityAuthTypeAIProvider,
 				AuthTypeName: "apikey",
 				Identity:     lookupKey,
 				Type:         "openai-compatible",
@@ -107,12 +107,12 @@ func (s RuntimeMetadataSource) providerUsageIdentities() ([]models.UsageIdentity
 	return inputs, providerTypesFromIdentities(inputs)
 }
 
-func (s RuntimeMetadataSource) providerUsageIdentitiesFromAuthManager() []models.UsageIdentity {
+func (s RuntimeMetadataSource) providerUsageIdentitiesFromAuthManager() []entities.UsageIdentity {
 	if s.AuthManager == nil {
 		return nil
 	}
 	auths := s.AuthManager.List()
-	inputs := make([]models.UsageIdentity, 0, len(auths))
+	inputs := make([]entities.UsageIdentity, 0, len(auths))
 	for _, auth := range auths {
 		if auth == nil || auth.Attributes == nil {
 			continue
@@ -121,15 +121,15 @@ func (s RuntimeMetadataSource) providerUsageIdentitiesFromAuthManager() []models
 		if rawKey == "" {
 			continue
 		}
-		lookupKey := firstRuntimeString(auth.Attributes["source"], stableProviderLookupKey(auth.Provider, "", rawKey))
+		lookupKey := firstRuntimeString(auth.EnsureIndex(), auth.Attributes["source"], stableProviderLookupKey(auth.Provider, "", rawKey))
 		displayName := firstRuntimeString(auth.Label, auth.Prefix, auth.Attributes["compat_name"], auth.Attributes["base_url"], auth.Provider)
 		providerType := firstRuntimeString(auth.Attributes["provider_key"], auth.Provider)
 		if lookupKey == "" || providerType == "" {
 			continue
 		}
-		inputs = append(inputs, models.UsageIdentity{
+		inputs = append(inputs, entities.UsageIdentity{
 			Name:         displayName,
-			AuthType:     models.UsageIdentityAuthTypeAIProvider,
+			AuthType:     entities.UsageIdentityAuthTypeAIProvider,
 			AuthTypeName: "apikey",
 			Identity:     lookupKey,
 			Type:         providerType,
@@ -139,7 +139,7 @@ func (s RuntimeMetadataSource) providerUsageIdentitiesFromAuthManager() []models
 	return inputs
 }
 
-func appendProviderKeyIdentity[T any](inputs []models.UsageIdentity, provider string, values []T, metadata func(T) (string, string, string)) []models.UsageIdentity {
+func appendProviderKeyIdentity[T any](inputs []entities.UsageIdentity, provider string, values []T, metadata func(T) (string, string, string)) []entities.UsageIdentity {
 	for _, value := range values {
 		key, prefix, baseURL := metadata(value)
 		key = strings.TrimSpace(key)
@@ -148,9 +148,9 @@ func appendProviderKeyIdentity[T any](inputs []models.UsageIdentity, provider st
 		}
 		displayName := firstRuntimeString(prefix, baseURL, provider)
 		lookupKey := stableProviderLookupKey(provider, "", key)
-		inputs = append(inputs, models.UsageIdentity{
+		inputs = append(inputs, entities.UsageIdentity{
 			Name:         displayName,
-			AuthType:     models.UsageIdentityAuthTypeAIProvider,
+			AuthType:     entities.UsageIdentityAuthTypeAIProvider,
 			AuthTypeName: "apikey",
 			Identity:     lookupKey,
 			Type:         provider,
@@ -160,7 +160,7 @@ func appendProviderKeyIdentity[T any](inputs []models.UsageIdentity, provider st
 	return inputs
 }
 
-func providerTypesFromIdentities(identities []models.UsageIdentity) []string {
+func providerTypesFromIdentities(identities []entities.UsageIdentity) []string {
 	types := make([]string, 0, len(identities))
 	for _, identity := range identities {
 		if strings.TrimSpace(identity.Type) != "" {

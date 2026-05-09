@@ -65,11 +65,14 @@ rsync -a --delete /tmp/cpa-usage-keeper/internal/auth/ internal/usagekeeper/upst
 rsync -a --delete /tmp/cpa-usage-keeper/internal/backup/ internal/usagekeeper/upstream/backup/
 rsync -a --delete /tmp/cpa-usage-keeper/internal/cpa/ internal/usagekeeper/upstream/cpa/
 rsync -a --delete /tmp/cpa-usage-keeper/internal/config/ internal/usagekeeper/upstream/config/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/entities/ internal/usagekeeper/upstream/entities/
 rsync -a --delete /tmp/cpa-usage-keeper/internal/logging/ internal/usagekeeper/upstream/logging/
-rsync -a --delete /tmp/cpa-usage-keeper/internal/models/ internal/usagekeeper/upstream/models/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/poller/ internal/usagekeeper/upstream/poller/
 rsync -a --delete /tmp/cpa-usage-keeper/internal/redact/ internal/usagekeeper/upstream/redact/
 rsync -a --delete /tmp/cpa-usage-keeper/internal/repository/ internal/usagekeeper/upstream/repository/
 rsync -a --delete /tmp/cpa-usage-keeper/internal/service/ internal/usagekeeper/upstream/service/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/updatecheck/ internal/usagekeeper/upstream/updatecheck/
+rsync -a --delete /tmp/cpa-usage-keeper/internal/version/ internal/usagekeeper/upstream/version/
 rsync -a --delete /tmp/cpa-usage-keeper/web/ web/usage-keeper/
 scripts/build-usage-keeper-assets.sh
 ```

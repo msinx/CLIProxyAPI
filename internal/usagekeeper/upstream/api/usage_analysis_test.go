@@ -7,54 +7,50 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/redact"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
 )
 
 type usageAnalysisStub struct {
-	analysis      *service.UsageAnalysisSnapshot
+	analysis      *servicedto.UsageAnalysisSnapshot
 	err           error
-	lastFilter    service.UsageFilter
+	lastFilter    servicedto.UsageFilter
 	analysisCalls int
 }
 
-func (s *usageAnalysisStub) GetUsageWithFilter(context.Context, service.UsageFilter) (*cpa.StatisticsSnapshot, error) {
+func (s *usageAnalysisStub) GetUsageWithFilter(context.Context, servicedto.UsageFilter) (*dto.StatisticsSnapshot, error) {
 	return nil, nil
 }
 
-func (s *usageAnalysisStub) GetUsageOverview(context.Context, service.UsageFilter) (*service.UsageOverviewSnapshot, error) {
+func (s *usageAnalysisStub) GetUsageOverview(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error) {
 	return nil, nil
 }
 
-func (s *usageAnalysisStub) ListUsageEvents(context.Context, service.UsageFilter) (*service.UsageEventsPage, error) {
+func (s *usageAnalysisStub) ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error) {
 	return nil, nil
 }
 
-func (s *usageAnalysisStub) ListUsageEventFilterOptions(context.Context, service.UsageFilter) (*service.UsageEventFilterOptions, error) {
+func (s *usageAnalysisStub) ListUsageEventFilterOptions(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error) {
 	return nil, nil
 }
 
-func (s *usageAnalysisStub) ListUsageCredentialStats(context.Context, service.UsageFilter) ([]service.UsageCredentialStat, error) {
-	return nil, nil
-}
-
-func (s *usageAnalysisStub) GetUsageAnalysis(_ context.Context, filter service.UsageFilter) (*service.UsageAnalysisSnapshot, error) {
+func (s *usageAnalysisStub) GetUsageAnalysis(_ context.Context, filter servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error) {
 	s.lastFilter = filter
 	s.analysisCalls++
 	return s.analysis, s.err
 }
 
 func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
-	provider := &usageAnalysisStub{analysis: &service.UsageAnalysisSnapshot{
-		APIs: []service.UsageAnalysisAPIStat{{
+	provider := &usageAnalysisStub{analysis: &servicedto.UsageAnalysisSnapshot{
+		APIs: []servicedto.UsageAnalysisAPIStat{{
 			APIKey:        "provider-a",
 			DisplayName:   "provider-a",
 			TotalRequests: 2,
 			SuccessCount:  1,
 			FailureCount:  1,
 			TotalTokens:   42,
-			Models: []service.UsageAnalysisModelStat{{
+			Models: []servicedto.UsageAnalysisModelStat{{
 				Model:              "claude-sonnet",
 				TotalRequests:      2,
 				SuccessCount:       1,
@@ -68,7 +64,7 @@ func TestUsageAnalysisReturnsAggregatedRows(t *testing.T) {
 				LatencySampleCount: 2,
 			}},
 		}},
-		Models: []service.UsageAnalysisModelStat{{
+		Models: []servicedto.UsageAnalysisModelStat{{
 			Model:              "claude-sonnet",
 			TotalRequests:      2,
 			SuccessCount:       1,

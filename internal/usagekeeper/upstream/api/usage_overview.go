@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/redact"
+	repodto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
 )
 
 type usageOverviewResponse struct {
@@ -134,7 +135,7 @@ func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageP
 			return
 		}
 
-		var usage *cpa.StatisticsSnapshot
+		var usage *repodto.StatisticsSnapshot
 		if overview != nil {
 			usage = overview.Usage
 		}
@@ -153,7 +154,7 @@ func registerUsageOverviewRoute(router gin.IRoutes, usageProvider service.UsageP
 	})
 }
 
-func buildUsageOverviewPayload(snapshot *cpa.StatisticsSnapshot) usageOverviewPayload {
+func buildUsageOverviewPayload(snapshot *repodto.StatisticsSnapshot) usageOverviewPayload {
 	if snapshot == nil {
 		return usageOverviewPayload{
 			APIs:           map[string]usageOverviewAPISnapshot{},
@@ -199,7 +200,7 @@ func buildUsageOverviewPayload(snapshot *cpa.StatisticsSnapshot) usageOverviewPa
 	return payload
 }
 
-func buildUsageOverviewSummary(overview *service.UsageOverviewSnapshot) usageOverviewSummary {
+func buildUsageOverviewSummary(overview *servicedto.UsageOverviewSnapshot) usageOverviewSummary {
 	if overview == nil {
 		return usageOverviewSummary{}
 	}
@@ -231,7 +232,7 @@ func emptyUsageOverviewSeries() usageOverviewSeries {
 	}
 }
 
-func mapUsageOverviewSeriesLine(series service.UsageOverviewSeries) usageOverviewSeriesLine {
+func mapUsageOverviewSeriesLine(series servicedto.UsageOverviewSeries) usageOverviewSeriesLine {
 	return usageOverviewSeriesLine{
 		Requests:        cloneInt64Map(series.Requests),
 		Tokens:          cloneInt64Map(series.Tokens),
@@ -245,7 +246,7 @@ func mapUsageOverviewSeriesLine(series service.UsageOverviewSeries) usageOvervie
 	}
 }
 
-func mapUsageOverviewSeries(series service.UsageOverviewSeries) usageOverviewSeries {
+func mapUsageOverviewSeries(series servicedto.UsageOverviewSeries) usageOverviewSeries {
 	models := make(map[string]usageOverviewSeriesLine, len(series.Models))
 	for model, modelSeries := range series.Models {
 		models[model] = mapUsageOverviewSeriesLine(modelSeries)
@@ -264,28 +265,28 @@ func mapUsageOverviewSeries(series service.UsageOverviewSeries) usageOverviewSer
 	}
 }
 
-func buildUsageOverviewSeries(overview *service.UsageOverviewSnapshot) usageOverviewSeries {
+func buildUsageOverviewSeries(overview *servicedto.UsageOverviewSnapshot) usageOverviewSeries {
 	if overview == nil {
 		return emptyUsageOverviewSeries()
 	}
 	return mapUsageOverviewSeries(overview.Series)
 }
 
-func buildUsageOverviewHourlySeries(overview *service.UsageOverviewSnapshot) usageOverviewSeries {
+func buildUsageOverviewHourlySeries(overview *servicedto.UsageOverviewSnapshot) usageOverviewSeries {
 	if overview == nil {
 		return emptyUsageOverviewSeries()
 	}
 	return mapUsageOverviewSeries(overview.HourlySeries)
 }
 
-func buildUsageOverviewDailySeries(overview *service.UsageOverviewSnapshot) usageOverviewSeries {
+func buildUsageOverviewDailySeries(overview *servicedto.UsageOverviewSnapshot) usageOverviewSeries {
 	if overview == nil {
 		return emptyUsageOverviewSeries()
 	}
 	return mapUsageOverviewSeries(overview.DailySeries)
 }
 
-func buildUsageOverviewServiceHealth(overview *service.UsageOverviewSnapshot) usageOverviewServiceHealth {
+func buildUsageOverviewServiceHealth(overview *servicedto.UsageOverviewSnapshot) usageOverviewServiceHealth {
 	if overview == nil {
 		return usageOverviewServiceHealth{BlockDetails: []usageOverviewServiceHealthBlock{}}
 	}

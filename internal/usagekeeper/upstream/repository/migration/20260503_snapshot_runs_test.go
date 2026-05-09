@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"gorm.io/gorm"
 )
 
 func TestOpenDatabaseDropsLegacySnapshotRunsTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedPerformanceIndexMigrationDatabase(t, dbPath)
 	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(dbPath)), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open legacy database: %v", err)
@@ -46,10 +47,10 @@ func TestOpenDatabaseDropsLegacySnapshotRunIDColumns(t *testing.T) {
 	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	if db.Migrator().HasColumn(&models.UsageEvent{}, "snapshot_run_id") {
+	if db.Migrator().HasColumn(&entities.UsageEvent{}, "snapshot_run_id") {
 		t.Fatal("expected usage_events.snapshot_run_id to be dropped")
 	}
-	if db.Migrator().HasColumn(&models.RedisUsageInbox{}, "snapshot_run_id") {
+	if db.Migrator().HasColumn(&entities.RedisUsageInbox{}, "snapshot_run_id") {
 		t.Fatal("expected redis_usage_inboxes.snapshot_run_id to be dropped")
 	}
 	var oldIndexCount int64
