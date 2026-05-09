@@ -17,6 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/poller"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/updatecheck"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/version"
 )
 
 const appBasePathPlaceholder = "__APP_BASE_PATH__"
@@ -77,11 +79,11 @@ func RegisterEmbeddedRoutes(
 	protected := apiV1.Group("")
 	protected.Use(authHandler.middleware())
 	registerStatusRoutes(protected, statusProvider)
+	registerUpdateRoutes(protected, nil)
 	registerSyncRoutes(protected, statusProvider, &syncLimiter{window: manualSyncRateLimitWindow})
 	registerUsageOverviewRoute(protected, usageProvider)
 	registerUsageAnalysisRoute(protected, usageProvider)
 	registerUsageEventsRoute(protected, usageProvider, usageIdentityProvider)
-	registerUsageCredentialsRoute(protected, usageProvider, usageIdentityProvider)
 	registerUsageIdentityRoutes(protected, usageIdentityProvider)
 	registerPricingRoutes(protected, pricingProvider)
 }
@@ -124,12 +126,23 @@ func NewRouter(
 					c.Status(http.StatusNotFound)
 					return
 				}
+				setHTMLCacheHeaders(c)
 				c.Data(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+			}
+			serveAsset := func(c *gin.Context) {
+				assetPath := "assets/" + strings.TrimPrefix(c.Param("filepath"), "/")
+				if assetFile, err := staticFS.Open(assetPath); err == nil {
+					_ = assetFile.Close()
+					setStaticAssetCacheHeaders(c)
+					c.FileFromFS(assetPath, httpFS)
+					return
+				}
+				c.Status(http.StatusNotFound)
 			}
 
 			appGroup.GET("/", serveIndex)
-			assetsFS, _ := fs.Sub(staticFS, "assets")
-			appGroup.StaticFS("/assets", http.FS(assetsFS))
+			appGroup.GET("/assets/*filepath", serveAsset)
+			appGroup.HEAD("/assets/*filepath", serveAsset)
 			router.NoRoute(func(c *gin.Context) {
 				requestPath, ok := stripBasePath(basePath, c.Request.URL.Path)
 				if !ok {
@@ -144,6 +157,7 @@ func NewRouter(
 				if assetPath, ok := staticAssetPath(requestPath); ok {
 					if assetFile, err := staticFS.Open(assetPath); err == nil {
 						_ = assetFile.Close()
+						setStaticAssetCacheHeaders(c)
 						c.FileFromFS(assetPath, httpFS)
 						return
 					}
@@ -155,6 +169,16 @@ func NewRouter(
 	}
 
 	return router
+}
+
+func setHTMLCacheHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+}
+
+func setStaticAssetCacheHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
 }
 
 func renderIndexHTML(staticFS fs.FS, basePath string) ([]byte, error) {
@@ -217,19 +241,21 @@ func stripBasePath(basePath, requestPath string) (string, bool) {
 }
 
 type statusResponse struct {
-	Running     bool       `json:"running"`
-	SyncRunning bool       `json:"sync_running"`
-	Timezone    string     `json:"timezone"`
-	LastRunAt   *time.Time `json:"last_run_at,omitempty"`
-	LastError   string     `json:"last_error,omitempty"`
-	LastWarning string     `json:"last_warning,omitempty"`
-	LastStatus  string     `json:"last_status,omitempty"`
+	Running            bool       `json:"running"`
+	SyncRunning        bool       `json:"sync_running"`
+	Timezone           string     `json:"timezone"`
+	Version            string     `json:"version"`
+	UpdateCheckEnabled bool       `json:"updateCheckEnabled"`
+	LastRunAt          *time.Time `json:"last_run_at,omitempty"`
+	LastError          string     `json:"last_error,omitempty"`
+	LastWarning        string     `json:"last_warning,omitempty"`
+	LastStatus         string     `json:"last_status,omitempty"`
 }
 
 func registerStatusRoutes(router gin.IRoutes, statusProvider StatusProvider) {
 	router.GET("/status", func(c *gin.Context) {
 		if statusProvider == nil {
-			c.JSON(http.StatusOK, statusResponse{Timezone: time.Local.String()})
+			c.JSON(http.StatusOK, buildStatusResponse(poller.Status{}))
 			return
 		}
 
@@ -278,12 +304,14 @@ func registerSyncRoutes(router gin.IRoutes, statusProvider StatusProvider, limit
 
 func buildStatusResponse(status poller.Status) statusResponse {
 	response := statusResponse{
-		Running:     status.Running,
-		SyncRunning: status.SyncRunning,
-		Timezone:    time.Local.String(),
-		LastError:   status.LastError,
-		LastWarning: status.LastWarning,
-		LastStatus:  status.LastStatus,
+		Running:            status.Running,
+		SyncRunning:        status.SyncRunning,
+		Timezone:           time.Local.String(),
+		Version:            version.Version,
+		UpdateCheckEnabled: updatecheck.IsStableVersion(version.Version),
+		LastError:          status.LastError,
+		LastWarning:        status.LastWarning,
+		LastStatus:         status.LastStatus,
 	}
 	if !status.LastRunAt.IsZero() {
 		lastRunAt := status.LastRunAt.UTC()

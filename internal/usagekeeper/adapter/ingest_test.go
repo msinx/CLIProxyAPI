@@ -9,7 +9,8 @@ import (
 
 	internallogging "github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
+	repodto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 )
 
@@ -35,7 +36,7 @@ func TestPluginIngestsUsageRecordsAndDedupeByRequestID(t *testing.T) {
 	app.Plugin.HandleUsage(ctx, record)
 	app.Plugin.HandleUsage(ctx, record)
 
-	events, err := app.UsageProvider.ListUsageEvents(context.Background(), service.UsageFilter{Page: 1, PageSize: 10})
+	events, err := app.UsageProvider.ListUsageEvents(context.Background(), servicedto.UsageFilter{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("ListUsageEvents returned error: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestPluginKeepsRecordsWithoutRequestIDDistinct(t *testing.T) {
 	app.Plugin.HandleUsage(context.Background(), record)
 	app.Plugin.HandleUsage(context.Background(), record)
 
-	events, err := app.UsageProvider.ListUsageEvents(context.Background(), service.UsageFilter{Page: 1, PageSize: 10})
+	events, err := app.UsageProvider.ListUsageEvents(context.Background(), servicedto.UsageFilter{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("ListUsageEvents returned error: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestClosingOldAppDoesNotDisableNewAppStore(t *testing.T) {
 		Detail:      coreusage.Detail{TotalTokens: 1},
 	})
 
-	events, err := newApp.UsageProvider.ListUsageEvents(context.Background(), service.UsageFilter{Page: 1, PageSize: 10})
+	events, err := newApp.UsageProvider.ListUsageEvents(context.Background(), servicedto.UsageFilter{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("ListUsageEvents returned error: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestConcurrentIngestAndQueriesDoNotLockDatabase(t *testing.T) {
 				RequestedAt: time.Date(2026, 5, 4, 1, 2, i%59, 0, time.UTC),
 				Detail:      coreusage.Detail{InputTokens: 1, OutputTokens: 2, TotalTokens: 3},
 			})
-			if _, err := app.UsageProvider.GetUsageOverview(ctx, service.UsageFilter{}); err != nil {
+			if _, err := app.UsageProvider.GetUsageOverview(ctx, servicedto.UsageFilter{}); err != nil {
 				t.Errorf("GetUsageOverview returned error: %v", err)
 			}
 		}(i)
@@ -171,7 +172,7 @@ func TestIngestedOverviewCountsSuccessFailureAndTokens(t *testing.T) {
 		Detail:      coreusage.Detail{InputTokens: 7, OutputTokens: 11, TotalTokens: 18},
 	})
 
-	snapshot, err := repository.BuildUsageSnapshotWithFilter(app.DB, repository.UsageQueryFilter{})
+	snapshot, err := repository.BuildUsageSnapshotWithFilter(app.DB, repodto.UsageQueryFilter{})
 	if err != nil {
 		t.Fatalf("BuildUsageSnapshotWithFilter returned error: %v", err)
 	}

@@ -6,10 +6,20 @@ export interface StatusResponse {
   running: boolean
   sync_running: boolean
   timezone: string
+  version?: string
+  updateCheckEnabled?: boolean
   last_run_at?: string
   last_error?: string
   last_warning?: string
   last_status?: string
+}
+
+export interface UpdateCheckResponse {
+  currentVersion: string
+  latestVersion: string
+  updateAvailable: boolean
+  canCompare: boolean
+  message: string
 }
 
 export interface UsageTokenStats {
@@ -27,7 +37,6 @@ export interface UsageDetail {
   source_raw?: string
   source_display?: string
   source_type?: string
-  source_key?: string
   auth_index: string
   failed: boolean
   tokens: UsageTokenStats
@@ -134,8 +143,8 @@ export interface UsageEvent {
   source: string
   source_raw?: string
   source_type?: string
-  source_key?: string
   auth_index?: string
+  isDelete?: boolean
   failed: boolean
   latency_ms: number
   tokens: UsageEventTokens
@@ -144,20 +153,22 @@ export interface UsageEvent {
 export interface UsageSourceFilterOption {
   value: string
   label: string
+  displayName?: string
 }
 
 export interface UsageEventsResponse {
   events: UsageEvent[]
-  models: string[]
-  sources: UsageSourceFilterOption[]
   total_count: number
   page: number
   page_size: number
   total_pages: number
 }
 
-export interface UsageEventFilterOptionsResponse {
+export interface UsageEventModelFilterOptionsResponse {
   models: string[]
+}
+
+export interface UsageEventSourceFilterOptionsResponse {
   sources: UsageSourceFilterOption[]
 }
 
@@ -166,6 +177,7 @@ export type UsageIdentityAuthType = 1 | 2
 export interface UsageIdentity {
   id: number
   name: string
+  displayName?: string
   auth_type: UsageIdentityAuthType
   auth_type_name: string
   identity: string

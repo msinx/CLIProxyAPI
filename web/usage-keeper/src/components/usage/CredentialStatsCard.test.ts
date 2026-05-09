@@ -37,6 +37,7 @@ describe('CredentialStatsCard helpers', () => {
       usageIdentity({
         id: 2,
         name: 'High Provider',
+        displayName: 'High Provider(Team Prefix)',
         auth_type: 2,
         auth_type_name: 'apikey',
         identity: 'sk-a***1234',
@@ -49,7 +50,7 @@ describe('CredentialStatsCard helpers', () => {
 
     const rows = buildCredentialRows(credentials);
 
-    expect(rows.map((row) => row.displayName)).toEqual(['High Provider', 'low']);
+    expect(rows.map((row) => row.displayName)).toEqual(['High Provider(Team Prefix)', 'low']);
     expect(rows[0]).toMatchObject({
       success: 8,
       failure: 2,
@@ -58,34 +59,44 @@ describe('CredentialStatsCard helpers', () => {
     });
   });
 
-  it('prefers identity type over auth type name for the credential tag', () => {
+  it('uses credential type directly for the credential tag', () => {
     const credentials = [
       usageIdentity({
         auth_type_name: 'apikey',
         identity: 'sk-a***1234',
-        type: 'openai',
+        type: '',
+        total_requests: 1,
       }),
     ] satisfies UsageIdentity[];
 
     const rows = buildCredentialRows(credentials);
 
-    expect(rows[0].type).toBe('openai');
+    expect(rows[0].type).toBe('');
   });
 
-  it('falls back to success plus failure when total count is empty', () => {
+  it('omits credentials whose total request count is zero', () => {
     const credentials = [
       usageIdentity({
-        identity: 'fallback-total',
+        id: 1,
+        identity: 'empty',
         success_count: 3,
         failure_count: 2,
         total_requests: 0,
       }),
+      usageIdentity({
+        id: 2,
+        identity: 'active',
+        success_count: 4,
+        failure_count: 1,
+        total_requests: 5,
+      }),
     ] satisfies UsageIdentity[];
 
     const rows = buildCredentialRows(credentials);
+    const topRows = getTopCredentialRows(rows);
 
-    expect(rows[0].total).toBe(5);
-    expect(rows[0].successRate).toBe(60);
+    expect(rows.map((row) => row.displayName)).toEqual(['active']);
+    expect(topRows.map((row) => row.displayName)).toEqual(['active']);
   });
 
   it('returns only the top 10 non-empty credential rows', () => {

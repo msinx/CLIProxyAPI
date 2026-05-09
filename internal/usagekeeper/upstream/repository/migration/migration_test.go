@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -30,6 +30,9 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 		"20260504_remove_prefix_usage_identities",
 		"20260505_add_usage_identity_lookup_key",
 		"20260505_migrate_ai_provider_identities_to_auth_index",
+		"20260506_add_usage_performance_indexes",
+		"20260507_add_usage_identity_metadata_fields",
+		"20260508_add_usage_event_model_alias",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected ordered migrations %v, got %v", want, got)
@@ -42,18 +45,21 @@ func TestOrderedMigrationsPreservesExecutionOrder(t *testing.T) {
 }
 
 func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing.T) {
-	db := openMigratedDatabase(t, filepath.Join(t.TempDir(), "app.db"))
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedLegacyRedisUsageTables(t, dbPath)
+
+	db := openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
 	if !db.Migrator().HasTable("schema_migrations") {
 		t.Fatal("expected schema_migrations table to exist")
 	}
 	for _, column := range []string{"provider", "endpoint", "auth_type", "request_id"} {
-		if !db.Migrator().HasColumn(&models.UsageEvent{}, column) {
+		if !db.Migrator().HasColumn(&entities.UsageEvent{}, column) {
 			t.Fatalf("expected usage_events.%s column to exist", column)
 		}
 	}
-	if !db.Migrator().HasColumn(&models.UsageIdentity{}, "lookup_key") {
+	if !db.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		t.Fatal("expected usage_identities.lookup_key column to exist")
 	}
 
@@ -74,6 +80,9 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 		"20260504_remove_prefix_usage_identities",
 		"20260505_add_usage_identity_lookup_key",
 		"20260505_migrate_ai_provider_identities_to_auth_index",
+		"20260506_add_usage_performance_indexes",
+		"20260507_add_usage_identity_metadata_fields",
+		"20260508_add_usage_event_model_alias",
 	}
 	if len(versions) != len(expected) {
 		t.Fatalf("expected migration versions %v, got %v", expected, versions)
@@ -86,7 +95,8 @@ func TestOpenDatabaseRunsSchemaMigrationsAndAddsUsageEventRedisFields(t *testing
 }
 
 func TestOpenDatabaseMigrationsAreIdempotent(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "app.db")
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedLegacyRedisUsageTables(t, dbPath)
 
 	db := openMigratedDatabase(t, dbPath)
 	closeOpenedDatabase(t, db)
@@ -98,14 +108,15 @@ func TestOpenDatabaseMigrationsAreIdempotent(t *testing.T) {
 	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
 		t.Fatalf("count schema migrations: %v", err)
 	}
-	if count != 12 {
-		t.Fatalf("expected 12 applied migrations after reopening database, got %d", count)
+	if count != 15 {
+		t.Fatalf("expected 15 applied migrations after reopening database, got %d", count)
 	}
 }
 
 func TestOpenDatabaseLogsSchemaMigrations(t *testing.T) {
 	logs := captureMigrationLogs(t, logrus.InfoLevel)
-	dbPath := filepath.Join(t.TempDir(), "app.db")
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	seedLegacyRedisUsageTables(t, dbPath)
 
 	db := openMigratedDatabase(t, dbPath)
 	closeOpenedDatabase(t, db)

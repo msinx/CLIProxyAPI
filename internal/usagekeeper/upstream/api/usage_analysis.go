@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/redact"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
 )
 
 type usageAnalysisResponse struct {
@@ -65,7 +66,7 @@ func registerUsageAnalysisRoute(router gin.IRoutes, usageProvider service.UsageP
 	})
 }
 
-func buildUsageAnalysisPayload(snapshot *service.UsageAnalysisSnapshot) usageAnalysisResponse {
+func buildUsageAnalysisPayload(snapshot *servicedto.UsageAnalysisSnapshot) usageAnalysisResponse {
 	if snapshot == nil {
 		return usageAnalysisResponse{APIs: []usageAnalysisAPIPayload{}, Models: []usageAnalysisModelPayload{}}
 	}

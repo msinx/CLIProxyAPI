@@ -3,14 +3,14 @@ package service
 import (
 	"context"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa"
+	repodto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
 )
 
 type UsageProvider interface {
-	GetUsageWithFilter(context.Context, UsageFilter) (*cpa.StatisticsSnapshot, error)
-	GetUsageOverview(context.Context, UsageFilter) (*UsageOverviewSnapshot, error)
-	ListUsageEvents(context.Context, UsageFilter) (*UsageEventsPage, error)
-	ListUsageEventFilterOptions(context.Context, UsageFilter) (*UsageEventFilterOptions, error)
-	ListUsageCredentialStats(context.Context, UsageFilter) ([]UsageCredentialStat, error)
-	GetUsageAnalysis(context.Context, UsageFilter) (*UsageAnalysisSnapshot, error)
+	GetUsageWithFilter(context.Context, servicedto.UsageFilter) (*repodto.StatisticsSnapshot, error)
+	GetUsageOverview(context.Context, servicedto.UsageFilter) (*servicedto.UsageOverviewSnapshot, error)
+	ListUsageEvents(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventsPage, error)
+	ListUsageEventFilterOptions(context.Context, servicedto.UsageFilter) (*servicedto.UsageEventFilterOptions, error)
+	GetUsageAnalysis(context.Context, servicedto.UsageFilter) (*servicedto.UsageAnalysisSnapshot, error)
 }

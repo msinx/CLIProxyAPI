@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
 )
 
-func BuildEventKey(apiGroupKey, model string, timestamp time.Time, source, authIndex string, failed bool, tokens cpa.TokenStats) string {
+func BuildEventKey(apiGroupKey, model string, timestamp time.Time, source, authIndex string, failed bool, tokens dto.TokenStats) string {
 	normalized := normalizeTokens(tokens)
 	payload := fmt.Sprintf(
 		"%s|%s|%s|%s|%s|%t|%d|%d|%d|%d|%d",
@@ -30,7 +30,7 @@ func BuildEventKey(apiGroupKey, model string, timestamp time.Time, source, authI
 	return hex.EncodeToString(sum[:])
 }
 
-func normalizeTokens(tokens cpa.TokenStats) cpa.TokenStats {
+func normalizeTokens(tokens dto.TokenStats) dto.TokenStats {
 	if tokens.TotalTokens == 0 {
 		tokens.TotalTokens = tokens.InputTokens + tokens.OutputTokens + tokens.ReasoningTokens
 	}

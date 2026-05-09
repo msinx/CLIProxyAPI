@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
@@ -33,8 +33,8 @@ func TestRuntimeMetadataSourceDoesNotPersistRawProviderKeys(t *testing.T) {
 		t.Fatalf("RefreshMetadata returned error: %v", err)
 	}
 
-	var items []models.UsageIdentity
-	if err := app.DB.Where("auth_type = ?", models.UsageIdentityAuthTypeAIProvider).Order("type asc, provider asc").Find(&items).Error; err != nil {
+	var items []entities.UsageIdentity
+	if err := app.DB.Where("auth_type = ?", entities.UsageIdentityAuthTypeAIProvider).Order("type asc, provider asc").Find(&items).Error; err != nil {
 		t.Fatalf("list provider usage identities: %v", err)
 	}
 	if len(items) != 2 {
@@ -76,8 +76,8 @@ func TestRuntimeMetadataSourceUsesAuthMetadataWithoutRawAPIKeyAccount(t *testing
 		t.Fatalf("RefreshMetadata returned error: %v", err)
 	}
 
-	var files []models.UsageIdentity
-	if err := app.DB.Where("auth_type = ?", models.UsageIdentityAuthTypeAuthFile).Find(&files).Error; err != nil {
+	var files []entities.UsageIdentity
+	if err := app.DB.Where("auth_type = ?", entities.UsageIdentityAuthTypeAuthFile).Find(&files).Error; err != nil {
 		t.Fatalf("list auth usage identities: %v", err)
 	}
 	if len(files) != 1 {
@@ -103,7 +103,7 @@ func TestPluginSourceUsesStableNonSecretProviderLookupKey(t *testing.T) {
 
 	app.Plugin.HandleUsage(context.Background(), record)
 
-	var event models.UsageEvent
+	var event entities.UsageEvent
 	if err := app.DB.First(&event).Error; err != nil {
 		t.Fatalf("load usage event: %v", err)
 	}
@@ -158,8 +158,8 @@ func TestPluginAPIKeyAuthSourceMatchesProviderIdentity(t *testing.T) {
 		t.Fatalf("AggregateUsageIdentities returned error: %v", err)
 	}
 
-	var identity models.UsageIdentity
-	if err := app.DB.Where("auth_type = ? AND type = ?", models.UsageIdentityAuthTypeAIProvider, "gemini").First(&identity).Error; err != nil {
+	var identity entities.UsageIdentity
+	if err := app.DB.Where("auth_type = ? AND type = ?", entities.UsageIdentityAuthTypeAIProvider, "gemini").First(&identity).Error; err != nil {
 		t.Fatalf("load provider identity: %v", err)
 	}
 	if identity.Identity == "" || identity.Identity == "raw-secret-key" {
@@ -172,19 +172,19 @@ func TestPluginAPIKeyAuthSourceMatchesProviderIdentity(t *testing.T) {
 
 func TestUsageIdentityReplacementDoesNotRequireRawLookupKeys(t *testing.T) {
 	app := newTestApp(t)
-	input := models.UsageIdentity{
+	input := entities.UsageIdentity{
 		Name:         "Gemini",
-		AuthType:     models.UsageIdentityAuthTypeAIProvider,
+		AuthType:     entities.UsageIdentityAuthTypeAIProvider,
 		AuthTypeName: "apikey",
 		Identity:     "provider:gemini:stable",
 		Type:         "gemini",
 		Provider:     "Gemini",
 	}
-	if err := repository.ReplaceUsageIdentitiesForProviderTypes(context.Background(), app.DB, []models.UsageIdentity{input}, []string{"gemini"}, timeNow()); err != nil {
+	if err := repository.ReplaceUsageIdentitiesForProviderTypes(context.Background(), app.DB, []entities.UsageIdentity{input}, []string{"gemini"}, timeNow()); err != nil {
 		t.Fatalf("ReplaceUsageIdentitiesForProviderTypes returned error: %v", err)
 	}
 
-	var item models.UsageIdentity
+	var item entities.UsageIdentity
 	if err := app.DB.First(&item).Error; err != nil {
 		t.Fatalf("load provider usage identity: %v", err)
 	}

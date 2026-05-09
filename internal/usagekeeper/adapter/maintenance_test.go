@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/backup"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
 )
 
 func TestRunMaintenanceRemovesOldUsageEventsAndKeepsRecentEvents(t *testing.T) {
@@ -26,7 +26,7 @@ func TestRunMaintenanceRemovesOldUsageEventsAndKeepsRecentEvents(t *testing.T) {
 	timeNow = func() time.Time { return now }
 	t.Cleanup(func() { timeNow = previousNow })
 
-	events := []models.UsageEvent{
+	events := []entities.UsageEvent{
 		{EventKey: "old", APIGroupKey: "provider", Model: "old", Timestamp: now.AddDate(0, 0, -8), TotalTokens: 1},
 		{EventKey: "recent", APIGroupKey: "provider", Model: "recent", Timestamp: now.AddDate(0, 0, -1), TotalTokens: 1},
 	}
@@ -38,7 +38,7 @@ func TestRunMaintenanceRemovesOldUsageEventsAndKeepsRecentEvents(t *testing.T) {
 		t.Fatalf("RunMaintenance returned error: %v", err)
 	}
 
-	page, err := app.UsageProvider.ListUsageEvents(context.Background(), service.UsageFilter{Page: 1, PageSize: 10})
+	page, err := app.UsageProvider.ListUsageEvents(context.Background(), servicedto.UsageFilter{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("ListUsageEvents returned error: %v", err)
 	}

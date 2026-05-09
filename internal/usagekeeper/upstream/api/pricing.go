@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
 )
 
 type usedModelsResponse struct {
@@ -121,7 +122,7 @@ func updatePricing(c *gin.Context, pricingProvider service.PricingProvider, path
 		return
 	}
 
-	setting, err := pricingProvider.UpdatePricing(c.Request.Context(), service.UpdatePricingInput{
+	setting, err := pricingProvider.UpdatePricing(c.Request.Context(), servicedto.UpdatePricingInput{
 		Model:                model,
 		PromptPricePer1M:     request.PromptPricePer1M,
 		CompletionPricePer1M: request.CompletionPricePer1M,

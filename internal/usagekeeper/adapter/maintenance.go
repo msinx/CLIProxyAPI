@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/backup"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
 	log "github.com/sirupsen/logrus"
 )
@@ -46,7 +46,7 @@ func (a *App) CleanupOldUsageEvents(now time.Time) error {
 		return nil
 	}
 	cutoff := now.UTC().AddDate(0, 0, -a.Config.RetentionDays)
-	if err := a.DB.Where("timestamp < ?", cutoff).Delete(&models.UsageEvent{}).Error; err != nil {
+	if err := a.DB.Where("timestamp < ?", cutoff).Delete(&entities.UsageEvent{}).Error; err != nil {
 		return err
 	}
 	return nil

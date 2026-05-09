@@ -187,11 +187,21 @@ func TestUsageDashboardMountsWithoutManagementSecret(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/usage", nil)
 	rr := httptest.NewRecorder()
 	server.engine.ServeHTTP(rr, req)
+	if rr.Code != http.StatusMovedPermanently {
+		t.Fatalf("GET /usage status = %d, want 301; body=%s", rr.Code, rr.Body.String())
+	}
+	if location := rr.Header().Get("Location"); location != "/usage/" {
+		t.Fatalf("GET /usage location = %q, want /usage/", location)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/usage/", nil)
+	rr = httptest.NewRecorder()
+	server.engine.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /usage status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("GET /usage/ status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
 	if !strings.Contains(rr.Body.String(), "CPA USAGE KEEPER") || !strings.Contains(rr.Body.String(), `window.__APP_BASE_PATH__ = "/usage"`) {
-		t.Fatalf("GET /usage did not return usage shell: %s", rr.Body.String())
+		t.Fatalf("GET /usage/ did not return usage shell: %s", rr.Body.String())
 	}
 
 	loginReq := httptest.NewRequest(http.MethodPost, "/usage/api/v1/auth/login", strings.NewReader(`{"password":"wrong"}`))

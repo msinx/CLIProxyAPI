@@ -3,15 +3,15 @@ package migration
 import (
 	"fmt"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"gorm.io/gorm"
 )
 
 func addUsageIdentityLookupKeyMigration(tx *gorm.DB) error {
-	if !tx.Migrator().HasTable(&models.UsageIdentity{}) {
+	if !tx.Migrator().HasTable(&entities.UsageIdentity{}) {
 		return nil
 	}
-	if !tx.Migrator().HasColumn(&models.UsageIdentity{}, "lookup_key") {
+	if !tx.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		if err := tx.Exec("ALTER TABLE usage_identities ADD COLUMN lookup_key TEXT").Error; err != nil {
 			return fmt.Errorf("add usage_identities.lookup_key column: %w", err)
 		}

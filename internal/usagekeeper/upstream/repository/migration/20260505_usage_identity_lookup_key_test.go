@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/models"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
 	"gorm.io/gorm"
 )
 
@@ -14,6 +14,29 @@ func TestOpenDatabaseAddsUsageIdentityLookupKeyToExistingTable(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(testSQLiteDSN(dbPath)), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open legacy database: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE usage_events (
+		id integer PRIMARY KEY AUTOINCREMENT,
+		event_key text,
+		api_group_key text,
+		provider text,
+		endpoint text,
+		auth_type text,
+		request_id text,
+		model text,
+		timestamp datetime,
+		source text,
+		auth_index text,
+		failed numeric,
+		latency_ms integer,
+		input_tokens integer,
+		output_tokens integer,
+		reasoning_tokens integer,
+		cached_tokens integer,
+		total_tokens integer,
+		created_at datetime
+	)`).Error; err != nil {
+		t.Fatalf("create usage_events table: %v", err)
 	}
 	if err := db.Exec(`CREATE TABLE usage_identities (
 		id integer PRIMARY KEY AUTOINCREMENT,
@@ -43,19 +66,23 @@ func TestOpenDatabaseAddsUsageIdentityLookupKeyToExistingTable(t *testing.T) {
 		t.Fatalf("create legacy usage_identities table: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider)
-		VALUES (?, ?, ?, ?, ?, ?)`, "Claude", models.UsageIdentityAuthTypeAIProvider, "apikey", "sk-legacy", "claude", "Claude").Error; err != nil {
+		VALUES (?, ?, ?, ?, ?, ?)`, "Claude", entities.UsageIdentityAuthTypeAIProvider, "apikey", "sk-legacy", "claude", "Claude").Error; err != nil {
 		t.Fatalf("seed legacy apikey usage identity: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO usage_identities (name, auth_type, auth_type_name, identity, type, provider)
-		VALUES (?, ?, ?, ?, ?, ?)`, "OAuth", models.UsageIdentityAuthTypeAuthFile, "oauth", "auth-index", "claude", "Claude").Error; err != nil {
+		VALUES (?, ?, ?, ?, ?, ?)`, "OAuth", entities.UsageIdentityAuthTypeAuthFile, "oauth", "auth-index", "claude", "Claude").Error; err != nil {
 		t.Fatalf("seed legacy oauth usage identity: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO usage_events (event_key, api_group_key, provider, endpoint, auth_type, request_id, model, timestamp, source, auth_index, failed, latency_ms, input_tokens, output_tokens, total_tokens, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, "legacy-event", "group", "Claude", "/v1/messages", "apikey", "legacy-event", "claude-sonnet", "2026-05-05T00:00:00Z", "sk-legacy", "auth-index-legacy", false, 100, 1, 2, 3, "2026-05-05T00:00:00Z").Error; err != nil {
+		t.Fatalf("seed legacy usage event: %v", err)
 	}
 	closeOpenedDatabase(t, db)
 
 	db = openMigratedDatabase(t, dbPath)
 	defer closeOpenedDatabase(t, db)
 
-	if !db.Migrator().HasColumn(&models.UsageIdentity{}, "lookup_key") {
+	if !db.Migrator().HasColumn(&entities.UsageIdentity{}, "lookup_key") {
 		t.Fatal("expected usage_identities.lookup_key column to be added")
 	}
 	var count int64
@@ -66,15 +93,15 @@ func TestOpenDatabaseAddsUsageIdentityLookupKeyToExistingTable(t *testing.T) {
 		t.Fatalf("expected lookup_key migration to be recorded once, got %d", count)
 	}
 
-	var apikey models.UsageIdentity
-	if err := db.Where("identity = ?", "sk-legacy").First(&apikey).Error; err != nil {
+	var apikey entities.UsageIdentity
+	if err := db.Where("identity = ?", "auth-index-legacy").First(&apikey).Error; err != nil {
 		t.Fatalf("load migrated apikey identity: %v", err)
 	}
 	if apikey.LookupKey != "sk-legacy" {
-		t.Fatalf("expected AutoMigrate to preserve migrated lookup_key, got %+v", apikey)
+		t.Fatalf("expected migrated apikey lookup_key to be preserved, got %+v", apikey)
 	}
 
-	var oauth models.UsageIdentity
+	var oauth entities.UsageIdentity
 	if err := db.Where("identity = ?", "auth-index").First(&oauth).Error; err != nil {
 		t.Fatalf("load migrated oauth identity: %v", err)
 	}
