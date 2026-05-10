@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/poller"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/updatecheck"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/version"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/poller"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/updatecheck"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/version"
 )
 
 const appBasePathPlaceholder = "__APP_BASE_PATH__"

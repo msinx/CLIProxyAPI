@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/poller"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/poller"
 )
 
 type StatusProvider struct {

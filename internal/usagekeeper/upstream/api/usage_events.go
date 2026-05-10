@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
-	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/entities"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service/dto"
 
 	"github.com/gin-gonic/gin"
 )

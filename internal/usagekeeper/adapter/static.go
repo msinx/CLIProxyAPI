@@ -4,7 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/assets"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/assets"
 )
 
 func EmbeddedStaticFileSystem() (http.FileSystem, error) {

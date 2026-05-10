@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
-	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository/dto"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service/dto"
 )
 
 type usageFilterStub struct {

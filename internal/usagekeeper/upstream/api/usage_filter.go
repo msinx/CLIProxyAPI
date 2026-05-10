@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service/dto"
 )
 
 var presetUsageRangeDurations = map[string]time.Duration{

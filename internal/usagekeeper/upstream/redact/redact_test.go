@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository/dto"
 )
 
 func TestAPIAliasIsStableAndIdempotent(t *testing.T) {

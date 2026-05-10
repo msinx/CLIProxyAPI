@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/cpa"
 )
 
 var configEnvKeys = []string{

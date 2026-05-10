@@ -5,10 +5,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/redact"
-	repodto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
-	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/redact"
+	repodto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository/dto"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service/dto"
 )
 
 type usageOverviewResponse struct {

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/entities"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	"gorm.io/gorm"
 )
 

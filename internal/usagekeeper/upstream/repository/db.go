@@ -2,16 +2,16 @@ package repository
 
 import (
 	"fmt"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository/dto"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/migration"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/entities"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository/migration"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

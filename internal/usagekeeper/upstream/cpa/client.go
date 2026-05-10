@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa/dto/providerconfig"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/cpa/dto/response"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/cpa/dto/providerconfig"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/cpa/dto/response"
 )
 
 type Client struct {

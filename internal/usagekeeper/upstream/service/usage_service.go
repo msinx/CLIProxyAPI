@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	repodto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository/dto"
-	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
+	repodto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository/dto"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service/dto"
 )
 
 type UsageProvider interface {

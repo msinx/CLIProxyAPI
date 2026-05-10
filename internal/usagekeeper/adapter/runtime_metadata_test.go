@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
-	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/entities"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 )
 
 func TestRuntimeMetadataSourceDoesNotPersistRawProviderKeys(t *testing.T) {

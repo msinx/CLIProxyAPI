@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	upstreamauth "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/auth"
-	upstreamconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/poller"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/repository"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service"
-	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
+	upstreamauth "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/auth"
+	upstreamconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/poller"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/repository"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )

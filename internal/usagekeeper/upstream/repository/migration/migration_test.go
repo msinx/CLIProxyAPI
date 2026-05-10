@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/entities"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/entities"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )

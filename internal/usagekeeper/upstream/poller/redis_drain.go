@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	servicedto "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/service/dto"
+	servicedto "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/service/dto"
 	"github.com/sirupsen/logrus"
 )
 

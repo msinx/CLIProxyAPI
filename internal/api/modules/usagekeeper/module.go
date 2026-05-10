@@ -11,12 +11,12 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/adapter"
-	usageassets "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/assets"
-	upstreamapi "github.com/router-for-me/CLIProxyAPI/v6/internal/usagekeeper/upstream/api"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/api/modules"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/adapter"
+	usageassets "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/assets"
+	upstreamapi "github.com/router-for-me/CLIProxyAPI/v7/internal/usagekeeper/upstream/api"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 )
 
 type ModuleOptions struct {
